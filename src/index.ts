@@ -284,6 +284,27 @@ if (checkTool !== null) {
     ),
   );
   if (!audit.clean) process.exitCode = 1;
+  // Advisory only: never affects clean or the exit code.
+  if (audit.waists.length > 0) {
+    const w = audit.waists.reduce((m, x) => Math.min(m, x.width), Infinity);
+    console.log(
+      row(
+        `advisory: ${audit.waists.length} waist(s)`,
+        `min ${w.toFixed(2)}mm`,
+        "report-only",
+      ),
+    );
+  }
+  if (audit.islands.length > 0) {
+    const m = audit.islands.reduce((a, x) => (x.moat < a.moat ? x : a));
+    console.log(
+      row(
+        `advisory: ${audit.islands.length} island candidate(s)`,
+        `min moat ${m.moat.toFixed(2)}mm`,
+        "report-only",
+      ),
+    );
+  }
 }
 if (useRestCut) {
   console.log(row("rest regions cut", "-", String(restCutRegions)));
