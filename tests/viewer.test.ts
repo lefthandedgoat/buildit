@@ -256,9 +256,6 @@ describe("viewer messaging helpers (render-only, grade-safe)", () => {
 
   it("worst-point callouts format coordinates", () => {
     assert.equal(core.fmtPt(null), "-");
-    assert.equal(
-      core.fmtPt([1.234, -2, 3.5, "g1"]),
-      "X1.23 Y-2.00 Z3.50",
-    );
+    assert.equal(core.fmtPt([1.234, -2, 3.5, "g1"]), "X1.23 Y-2.00 Z3.50");
   });
 });

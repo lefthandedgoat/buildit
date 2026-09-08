@@ -84,7 +84,9 @@ describe("blockTimeWithEntry", () => {
   });
 
   it("is pure cruise when entering and exiting at feed", () => {
-    assert.ok(Math.abs(blockTimeWithEntry(3, V, V, FEED, ACCEL) - 3 / V) < 1e-12);
+    assert.ok(
+      Math.abs(blockTimeWithEntry(3, V, V, FEED, ACCEL) - 3 / V) < 1e-12,
+    );
   });
 
   it("never takes longer with higher entry/exit speeds", () => {
@@ -181,7 +183,8 @@ describe("rapids stay stop-to-stop under opt-in blending", () => {
   // full program below, so the decomposition is exact.
   const LEFT = "G21 G90\nG1 X0.3 F450\nX0.6\nX0.9";
   const RIGHT = "G21 G90\nG0 X10\nG1 X10.3 F450\nX10.6\nX10.9";
-  const FULL = "G21 G90\nG1 X0.3 F450\nX0.6\nX0.9\nG0 X10\nG1 X10.3\nX10.6\nX10.9";
+  const FULL =
+    "G21 G90\nG1 X0.3 F450\nX0.6\nX0.9\nG0 X10\nG1 X10.3\nX10.6\nX10.9";
   const RAPID_DIST = 10 - 0.9;
 
   it("a G0 separates blended runs and costs exactly blockTime", () => {

@@ -113,8 +113,7 @@ export function blockTimeWithEntry(
 
 export function estimate(prog: Program, opts: EstimateOptions): Estimate {
   const moves = trackMoves(prog);
-  const jd =
-    opts.junctionDeviation === undefined ? 0 : opts.junctionDeviation;
+  const jd = opts.junctionDeviation === undefined ? 0 : opts.junctionDeviation;
   let naive = 0;
   let accel = 0;
   let g0 = 0;
@@ -125,8 +124,7 @@ export function estimate(prog: Program, opts: EstimateOptions): Estimate {
   // Directions are chord unit vectors (arcs use chord, ~tangent for
   // short blocks); the run stops at rapids, feed/position gaps, and
   // program ends, where the machine really does stop.
-  let run: { dist: number; feed: number; dir: [number, number, number] }[] =
-    [];
+  let run: { dist: number; feed: number; dir: [number, number, number] }[] = [];
   const flushRun = () => {
     if (run.length === 0) return;
     const n = run.length;
@@ -211,7 +209,7 @@ export function estimate(prog: Program, opts: EstimateOptions): Estimate {
         const dy = m.to[1] - m.from[1];
         const dz = m.to[2] - m.from[2];
         const len = Math.hypot(dx, dy, dz);
-        if ((len > 0)) {
+        if (len > 0) {
           run.push({
             dist,
             feed,
