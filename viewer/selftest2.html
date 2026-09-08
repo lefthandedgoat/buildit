@@ -1,0 +1,22 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>t2</title></head><body>
+<script src="core.cjs"></script>
+<script>
+const T = window.builditCore;
+const g = `G90
+G21
+G0Z4
+G0X0Y0
+G1Z-2F350
+G1X0Y9F500
+G1X10Y9
+G1X10Y0
+G1X0Y0
+G0Z4
+M02
+`;
+const A = T.parseNC(g), B = T.parseNC(g);
+const sa = T.samplePath(A, 0.1, 60000), sb = T.samplePath(B, 0.1, 60000);
+const d = T.deviation(sa.pts, sb.pts, T.stockTop(A));
+document.title = 'DONE';
+document.body.innerHTML = '<pre>' + JSON.stringify({maxA: +d.maxA.toFixed(5), maxB: +d.maxB.toFixed(5)}) + '</pre>';
+</script></body></html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>selftest</title></head><body>
+<script src="core.cjs"></script>
+<script>
+const T = window.builditCore;
+// before: square pocket 0..10 at Z-2 + rapid home; after: same + one arc corner + rest plunge
+const before = `G90
+G21
+G0Z4
+G0X0Y0
+G1Z-2F350
+G1X0Y9F500
+G1X0Y10
+G1X1Y10
+G1X10Y0
+G1X0Y0
+G0Z4
+M02
+`;
+const after = `G90
+G21
+G0Z4
+G0X0Y0
+G1Z-2F350
+G1X0Y9F500
+G3X1Y10I0J1
+G1X10Y10
+G1X0Y0
+(BUILDIT REST op=0 tool=1.5 z=-2)
+G0Z5.027
+X5Y5
+G1Z-2F350
+X5.2Y5F500
+G0Z5.027
+(BUILDIT REST END)
+G0Z4
+M02
+`;
+const A = T.parseNC(before), B = T.parseNC(after);
+const sa = T.samplePath(A, 0.1, 60000), sb = T.samplePath(B, 0.1, 60000);
+const tz = T.stockTop(A);
+const d = T.deviation(sa.pts, sb.pts, tz);
+document.title = 'DONE';
+document.body.innerHTML = '<pre id=r>' + JSON.stringify({
+  blocksA: A.length, blocksB: B.length, stockTop: tz,
+  maxA: +d.maxA.toFixed(4), maxB: +d.maxB.toFixed(4),
+  restB: sb.counts.rest, arcsB: sb.counts.arc,
+}) + '</pre>';
+</script></body></html>

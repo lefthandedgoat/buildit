@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>buildit viewer — before/after G-code diff</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        background: #141417;
+        color: #ddd;
+      }
+      #bar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 14px;
+        background: #1d1d22;
+        flex-wrap: wrap;
+      }
+      #bar label {
+        font-size: 13px;
+      }
+      #verdict {
+        font-weight: 700;
+        font-size: 15px;
+        padding: 4px 12px;
+        border-radius: 6px;
+      }
+      .green {
+        background: #123d1f;
+        color: #7be495;
+      }
+      .amber {
+        background: #4a380f;
+        color: #ffd479;
+      }
+      .red {
+        background: #521b1b;
+        color: #ff9a9a;
+      }
+      #meta {
+        font-size: 12px;
+        color: #aaa;
+        padding: 6px 14px;
+      }
+      #views {
+        display: flex;
+      }
+      canvas {
+        flex: 1;
+        min-width: 0;
+        height: calc(100vh - 150px);
+        background: #0c0c0e;
+      }
+      #views.split canvas + canvas {
+        border-left: 1px solid #333;
+      }
+      #views.overlay #afterc {
+        display: none;
+      }
+      .legend {
+        font-size: 12px;
+        color: #aaa;
+        padding: 6px 14px;
+      }
+      .sw {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        margin: 0 4px 0 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <label
+        >before <input type="file" id="fbefore" accept=".nc,.gcode,.tap"
+      /></label>
+      <label
+        >after <input type="file" id="fafter" accept=".nc,.gcode,.tap"
+      /></label>
+      <button id="mode">overlay</button>
+      <label><input type="checkbox" id="lrapids" checked /> rapids</label>
+      <label><input type="checkbox" id="lrest" checked /> rest</label>
+      <span id="verdict">drop two .nc files</span>
+    </div>
+    <div id="meta"></div>
+    <div id="views" class="overlay">
+      <canvas id="beforec"></canvas><canvas id="afterc"></canvas>
+    </div>
+    <div class="legend">
+      <span class="sw" style="background: #ff5a4e"></span>before cuts
+      <span class="sw" style="background: #ff9a4e"></span>before arcs
+      <span class="sw" style="background: #3ee6a8"></span>after cuts
+      <span class="sw" style="background: #4ec9ff"></span>after arcs
+      <span class="sw" style="background: #c77dff"></span>rest (added)
+      <span class="sw" style="background: #555"></span>rapids/travel
+    </div>
+    <script src="core.cjs"></script>
+    <script>
+      const T = window.builditCore;
+      const state = { A: null, B: null, overlay: true };
+      const $ = (id) => document.getElementById(id);
+
+      function prep(text) {
+        const blocks = T.parseNC(text);
+        const samp = T.samplePath(blocks, 0.15, 60000);
+        return { blocks, samp };
+      }
+      function bounds(layers) {
+        let x0 = 1e18,
+          x1 = -1e18,
+          y0 = 1e18,
+          y1 = -1e18;
+        for (const pts of layers)
+          for (const p of pts) {
+            if (!p) continue;
+            if (p[0] < x0) x0 = p[0];
+            if (p[0] > x1) x1 = p[0];
+            if (p[1] < y0) y0 = p[1];
+            if (p[1] > y1) y1 = p[1];
+          }
+        return [x0, y0, x1, y1];
+      }
+      function draw(canvas, layers, colors, bb, title) {
+        const ctx = canvas.getContext("2d");
+        const W = (canvas.width = canvas.clientWidth * 2);
+        const H = (canvas.height = canvas.clientHeight * 2);
+        ctx.fillStyle = "#0c0c0e";
+        ctx.fillRect(0, 0, W, H);
+        const [x0, y0, x1, y1] = bb;
+        const sc = Math.min(W / (x1 - x0 || 1), H / (y1 - y0 || 1)) * 0.92;
+        const ox = W / 2 - ((x0 + x1) / 2) * sc,
+          oy = H / 2 + ((y0 + y1) / 2) * sc;
+        const X = (x) => ox + x * sc,
+          Y = (y) => oy - y * sc;
+        layers.forEach((pts, li) => {
+          ctx.strokeStyle = colors[li];
+          ctx.lineWidth = li >= 4 ? 3 : 1.5;
+          ctx.globalAlpha = li === 5 ? 0.35 : 0.9;
+          ctx.beginPath();
+          let pen = false;
+          for (const p of pts) {
+            if (!p) {
+              pen = false;
+              continue;
+            }
+            if (!pen) {
+              ctx.moveTo(X(p[0]), Y(p[1]));
+              pen = true;
+            } else ctx.lineTo(X(p[0]), Y(p[1]));
+          }
+          ctx.stroke();
+        });
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#888";
+        ctx.font = "24px system-ui";
+        ctx.fillText(title, 16, 32);
+      }
+      // layers: [cuts, arcs] per file + shared [rest, rapids]
+      function splitLayers(samp) {
+        const cuts = [],
+          arcs = [],
+          rest = [],
+          rap = [];
+        for (const p of samp.pts) {
+          if (!p) {
+            cuts.push(null);
+            arcs.push(null);
+            rest.push(null);
+            rap.push(null);
+            continue;
+          }
+          const k = p[3];
+          cuts.push(k === "g1" || k === "link" ? p : null);
+          arcs.push(k === "arc" ? p : null);
+          rest.push(k === "rest" ? p : null);
+          rap.push(k === "g0" ? p : null);
+        }
+        return { cuts, arcs, rest, rap };
+      }
+      function refresh() {
+        if (!state.A || !state.B) return;
+        const tz = T.stockTop(state.A.blocks);
+        const t0 = performance.now();
+        const d = T.deviation(state.A.samp.pts, state.B.samp.pts, tz);
+        const ms = Math.round(performance.now() - t0);
+        const an = T.anomalies(state.A.blocks, tz);
+        const v = $("verdict");
+        // Grade on the WORST of preservation/additions. Travel the optimizer
+        // moved (exclMax) caps at amber: lowered clearance is unprovable
+        // statically (workholding), so it needs eyes, not trust.
+        const worst = Math.max(d.maxA, d.maxB);
+        const excl = d.exclMax || 0;
+        const grade =
+          worst <= 0.25 && excl <= 0.5
+            ? ["green", "SAFE TO CARVE"]
+            : worst <= 1.5
+              ? ["amber", "INSPECT — see location"]
+              : ["red", "DO NOT RUN"];
+        v.className = grade[0];
+        v.textContent =
+          `${grade[1]} · preserve ${d.maxA.toFixed(3)} / added ${d.maxB.toFixed(3)} mm` +
+          (excl > 0.5
+            ? ` · travel moved ${excl.toFixed(2)} (check clearance)`
+            : "");
+        let meta =
+          `stockTop ${tz.toFixed(2)} · mean ${d.mean.toFixed(4)} · ${ms}ms · ` +
+          `worst preserved missing at ${d.worstA ? d.worstA.slice(0, 3).map((x) => +x.toFixed(2)) : "-"}`;
+        if (an.count)
+          meta += ` · ⚠ ${an.count} deep-plunge pts to ${an.worst.toFixed(1)} (mesh glitch?)`;
+        $("meta").textContent = meta;
+        const la = splitLayers(state.A.samp),
+          lb = splitLayers(state.B.samp);
+        const showRap = $("lrapids").checked,
+          showRest = $("lrest").checked;
+        // Bounds span all ENABLED layers so toggles never push geometry off-canvas.
+        const bbSets = [la.cuts, la.arcs, lb.cuts, lb.arcs];
+        if (showRest) bbSets.push(lb.rest);
+        if (showRap) bbSets.push(la.rap, lb.rap);
+        const bb = bounds(bbSets);
+        if (state.overlay) {
+          $("views").className = "overlay";
+          const layers = [la.cuts, la.arcs, lb.cuts, lb.arcs];
+          const colors = ["#ff5a4e", "#ff9a4e", "#3ee6a8", "#4ec9ff"];
+          if (showRest) {
+            layers.push(lb.rest);
+            colors.push("#c77dff");
+          }
+          if (showRap) {
+            layers.push(la.rap, lb.rap);
+            colors.push("#555", "#555");
+          }
+          draw(
+            $("beforec"),
+            layers,
+            colors,
+            bb,
+            "overlay: before(red) + after(green)",
+          );
+        } else {
+          $("views").className = "split";
+          const ca = [la.cuts, la.arcs],
+            cca = ["#ff5a4e", "#ff9a4e"];
+          const cb = [lb.cuts, lb.arcs],
+            ccb = ["#3ee6a8", "#4ec9ff"];
+          if (showRest) {
+            ca.push([]);
+            cca.push("#c77dff");
+            cb.push(lb.rest);
+            ccb.push("#c77dff");
+          }
+          if (showRap) {
+            ca.push(la.rap);
+            cca.push("#555");
+            cb.push(lb.rap);
+            ccb.push("#555");
+          }
+          draw($("beforec"), ca, cca, bb, "before");
+          draw($("afterc"), cb, ccb, bb, "after");
+        }
+      }
+      function load(input, slot) {
+        const f = input.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = () => {
+          try {
+            state[slot] = prep(r.result);
+          } catch (e) {
+            alert("parse failed: " + e.message);
+            return;
+          }
+          refresh();
+        };
+        r.readAsText(f);
+      }
+      $("fbefore").onchange = (e) => load(e.target, "A");
+      $("fafter").onchange = (e) => load(e.target, "B");
+      $("mode").onclick = (e) => {
+        state.overlay = !state.overlay;
+        e.target.textContent = state.overlay ? "overlay" : "split";
+        refresh();
+      };
+      $("lrapids").onchange = refresh;
+      $("lrest").onchange = refresh;
+      window.addEventListener("resize", refresh);
+    </script>
+  </body>
+</html>

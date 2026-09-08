@@ -1,0 +1,313 @@
+#!/usr/bin/env node
+// buildit CLI: optimize grbl G-code and report honest cycle times.
+//
+// Usage: buildit <input.nc> [-o output.nc] [--machine NAME] [--accel 400]
+//        [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02]
+//        [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust]
+//        [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D]
+//        [--rest-cut --finish-tool D] [--check D [--check-prev P]]
+
+import { readFileSync, writeFileSync } from "node:fs";
+import { parse } from "./parser.ts";
+import { janitor } from "./janitor.ts";
+import { fitArcs } from "./arcs.ts";
+import { emit } from "./janitor.ts";
+import { estimate } from "./estimate.ts";
+import { optimizeRapids } from "./rapids.ts";
+import { retunePlunges } from "./plunge.ts";
+import { getProfile } from "./materials.ts";
+import { analyzeRest } from "./rest2d.ts";
+import { maybeApplyRestCut } from "./restcut.ts";
+import { auditBlocks } from "./check.ts";
+import { getMachine, machineNames, resolveRates } from "./machines.ts";
+
+function usage(): never {
+  console.error(
+    "Usage: buildit <input.nc> [-o output.nc] [--machine NAME] [--accel 400] [--rapid 5000] [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02] [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust] [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D] [--rest-cut --finish-tool D] [--check D [--check-prev P]]",
+  );
+  process.exit(2);
+}
+
+function arg(flag: string, def: string | null): string | null {
+  const i = process.argv.indexOf(flag);
+  if (i < 0 || i + 1 >= process.argv.length) return def;
+  return process.argv[i + 1];
+}
+
+const input = process.argv[2];
+if (!input || input.startsWith("-")) usage();
+const output = arg("-o", null);
+const machineName = arg("--machine", "shapeoko");
+const machine = getMachine(machineName ?? "shapeoko");
+if (!machine) {
+  console.error(
+    `unknown --machine "${machineName}" (available: ${machineNames().join(", ")})`,
+  );
+  process.exit(2);
+}
+// Explicit flags beat the preset (a calibration run in progress wins).
+// Presence-checked, not value-checked: --accel 400 over shapeoko is
+// still an override (same value, explicit provenance).
+const accelRaw = process.argv.includes("--accel")
+  ? Number(arg("--accel", ""))
+  : null;
+const rapidRaw = process.argv.includes("--rapid")
+  ? Number(arg("--rapid", ""))
+  : null;
+const rates = resolveRates(machine, accelRaw, rapidRaw);
+if (
+  (accelRaw !== null && !Number.isFinite(accelRaw)) ||
+  (rapidRaw !== null && !Number.isFinite(rapidRaw))
+)
+  usage(); // typo'd override must fail, never silently fall back
+const accel = rates.accel;
+const rapid = rates.rapidRate;
+const tolerance = Number(arg("--tolerance", "0.01"));
+const decimals = Number(arg("--decimals", "3"));
+const useArcs = process.argv.includes("--no-arcs")
+  ? false
+  : process.argv.includes("--arcs")
+    ? true
+    : true; // on by default
+const arcTol = Number(arg("--arc-tol", "0.02"));
+const useTsp = process.argv.includes("--no-tsp") ? false : true; // on by default
+const clearanceRaw = arg("--clearance", "auto");
+const clearance =
+  clearanceRaw === "auto" ? ("auto" as const) : Number(clearanceRaw);
+const material = getProfile(arg("--material", "walnut") ?? "walnut");
+const peckOverride = arg("--peck-profile", null);
+const profile = peckOverride
+  ? { ...material, peckDepth: getProfile(peckOverride).peckDepth }
+  : material;
+const usePlunge = !process.argv.includes("--no-plunge");
+const restPrevRaw = arg("--rest-2d", null);
+const restPrev = restPrevRaw === null ? null : Number(restPrevRaw);
+const restFinish = Number(arg("--rest-finish", "1.0"));
+const useRestCut = process.argv.includes("--rest-cut");
+const finishToolRaw = arg("--finish-tool", null);
+const finishTool = finishToolRaw === null ? null : Number(finishToolRaw);
+const checkRaw = arg("--check", null);
+const checkTool = checkRaw === null ? null : Number(checkRaw);
+const checkPrevRaw = arg("--check-prev", null);
+const checkPrev = checkPrevRaw === null ? null : Number(checkPrevRaw);
+if (checkPrev !== null && checkTool === null) {
+  console.error("--check-prev requires --check <toolD>");
+  process.exit(2);
+}
+if (useRestCut && (restPrev === null || finishTool === null)) {
+  console.error(
+    "--rest-cut requires both --rest-2d <prevD> and --finish-tool <diameter>",
+  );
+  process.exit(2);
+}
+if (
+  ![accel, rapid, tolerance, decimals, arcTol, restFinish].every(
+    Number.isFinite,
+  ) ||
+  (restPrev !== null && !Number.isFinite(restPrev)) ||
+  (checkTool !== null && !Number.isFinite(checkTool)) ||
+  (checkPrev !== null && !Number.isFinite(checkPrev)) ||
+  (clearance !== "auto" && !Number.isFinite(clearance))
+)
+  usage();
+
+const text = readFileSync(input, "utf8");
+const prog = parse(text);
+const before = estimate(prog, { accel, rapidRate: rapid });
+
+const { text: janitorText, stats } = janitor(prog, { tolerance, decimals });
+const janitorProg = parse(janitorText);
+const mid = estimate(janitorProg, { accel, rapidRate: rapid });
+
+// v4 rest cleanup cuts (opt-in): insert finish-tool cleanup immediately
+// after each parent pocket loop, pre-arcs while G1 loops still exist.
+let restCutRegions = 0;
+let restCutBlocks = 0;
+let restCutSec = 0;
+let stageProg = janitorProg;
+let stageText = janitorText;
+if (useRestCut) {
+  const rc = maybeApplyRestCut(janitorProg.blocks, true, {
+    prevDiameter: restPrev as number,
+    finishDiameter: finishTool as number,
+    plungeFeed: profile.plungeFeed,
+    clearance: clearance === "auto" ? stockTopOf(janitorProg) + 1.0 : clearance,
+    rapidRate: rapid,
+    accel,
+  });
+  stageProg = { blocks: rc.blocks };
+  restCutRegions = rc.regionsCut;
+  restCutBlocks = rc.restBlocks.filter((b) => !b.passthrough).length;
+  restCutSec = rc.addedSec;
+}
+
+function stockTopOf(prog: { blocks: import("./parser.ts").Block[] }): number {
+  let top = -Infinity;
+  for (const b of prog.blocks) {
+    if (b.motion === 1 && b.coords.Z !== undefined)
+      top = Math.max(top, b.coords.Z);
+  }
+  return Number.isFinite(top) ? top : 0;
+}
+
+// v2 arcs (optional).
+let arcsEmitted = 0;
+if (useArcs) {
+  const fit = fitArcs(stageProg.blocks, { tolerance: arcTol });
+  arcsEmitted = fit.stats.arcsEmitted;
+  stageProg = { blocks: fit.blocks };
+  stageText = emit(stageProg, decimals, true);
+}
+const postArcs = estimate(parse(stageText), { accel, rapidRate: rapid });
+
+// v3 rapids: TSP reorder + adaptive clearance.
+const rap = optimizeRapids(stageProg.blocks, {
+  tsp: useTsp,
+  clearance,
+  margin: 1.0,
+  rapidRate: rapid,
+  accel,
+});
+stageProg = { blocks: rap.blocks };
+stageText = emit(stageProg, decimals, true);
+const postRapids = estimate(parse(stageText), { accel, rapidRate: rapid });
+
+// v3 plunge/peck retune (safe direction only).
+let plungesRetuned = 0;
+let pecksClamped = 0;
+if (usePlunge) {
+  const ret = retunePlunges(stageProg.blocks, profile);
+  stageProg = { blocks: ret.blocks };
+  stageText = emit(stageProg, decimals, true);
+  plungesRetuned = ret.stats.plungesRetuned;
+  pecksClamped = ret.stats.pecksClamped;
+}
+
+// v3 rest analysis (report only, no cut paths). Runs on the post-
+// janitor stream: arcs fitting replaces G1 loops with G2/G3, and loop
+// extraction is G1-only in v3, so analyze before arcs.
+const rest =
+  restPrev === null
+    ? null
+    : analyzeRest(janitorProg.blocks, restPrev, restFinish);
+
+const outText = stageText;
+const afterProg = parse(outText);
+const after = estimate(afterProg, { accel, rapidRate: rapid });
+
+if (output) writeFileSync(output, outText);
+
+const row = (k: string, a: string, b: string) =>
+  `${k.padEnd(22)} ${a.padStart(14)} ${b.padStart(14)}`;
+console.log(row("metric", "before", "after"));
+console.log(row("machine", rates.source, `A${accel} R${rapid}`));
+console.log(
+  row(
+    "motion blocks",
+    String(before.g0Blocks + before.g1Blocks + before.arcBlocks),
+    String(after.g0Blocks + after.g1Blocks + after.arcBlocks),
+  ),
+);
+console.log(
+  row("G1 segments", String(before.g1Blocks), String(after.g1Blocks)),
+);
+console.log(
+  row("G1 segs < 0.2mm", String(before.g1Under02mm), String(after.g1Under02mm)),
+);
+console.log(row("zero-len dropped", "-", String(stats.droppedZeroLength)));
+console.log(row("collinear collapsed", "-", String(stats.collapsedCollinear)));
+if (useArcs) {
+  console.log(row("arcs emitted (G2/G3)", "-", String(arcsEmitted)));
+  console.log(row("accel min, janitor-only", "-", mid.accelMin.toFixed(1)));
+  console.log(row("accel min, +arcs", "-", postArcs.accelMin.toFixed(1)));
+}
+console.log(
+  row(
+    "rapid dist (mm)",
+    rap.stats.rapidDistBefore.toFixed(0),
+    rap.stats.rapidDistAfter.toFixed(0),
+  ),
+);
+console.log(
+  row(
+    "ops reordered / clearance cuts",
+    `${rap.stats.sitesFound} found`,
+    `${rap.stats.sitesReordered} / ${rap.stats.clearanceChanges}`,
+  ),
+);
+console.log(row("accel min, +rapids", "-", postRapids.accelMin.toFixed(1)));
+if (usePlunge) {
+  console.log(
+    row(`plunges retuned (${profile.name})`, "-", String(plungesRetuned)),
+  );
+  console.log(row("pecks clamped (Q)", "-", String(pecksClamped)));
+}
+if (rest) {
+  console.log(
+    row(
+      `rest regions (prev ${restPrev}mm)`,
+      `${rest.loopsFound} loops`,
+      `${rest.regions.length} / ${rest.totalRestArea.toFixed(2)}mm2`,
+    ),
+  );
+}
+// --check min-feature audit (report only, on the post-janitor stream).
+// Advisory: the -o file is still written; violations set exit 1.
+if (checkTool !== null) {
+  const audit = auditBlocks(janitorProg.blocks, {
+    toolDiameter: checkTool,
+    prevDiameter: checkPrev ?? undefined,
+  });
+  const bits: string[] = [];
+  if (audit.channels.length > 0) {
+    const w = audit.channels.reduce((m, c) => Math.min(m, c.width), Infinity);
+    const at = audit.channels.find((c) => c.width === w)!;
+    bits.push(
+      `${audit.channels.length} narrow (min ${w.toFixed(2)} @ ${at.at[0].toFixed(1)},${at.at[1].toFixed(1)} z${at.loopZ})`,
+    );
+  }
+  if (audit.tinyArcs.length > 0) {
+    const r = audit.tinyArcs.reduce((m, t) => Math.min(m, t.r), Infinity);
+    bits.push(`${audit.tinyArcs.length} tiny-arc (min r${r.toFixed(2)})`);
+  }
+  if (audit.corners.length > 0) {
+    const m = audit.corners.reduce((a, c) => (c.residue > a.residue ? c : a));
+    bits.push(
+      `${audit.corners.length} corners need hand work (worst ${m.residue.toFixed(2)}mm2 @ ${m.at[0].toFixed(1)},${m.at[1].toFixed(1)} z${m.loopZ})`,
+    );
+  }
+  console.log(
+    row(
+      `check (tool ${checkTool}mm)`,
+      `${audit.loopsFound} loops`,
+      bits.length > 0 ? bits.join("; ") : "clean",
+    ),
+  );
+  if (!audit.clean) process.exitCode = 1;
+}
+if (useRestCut) {
+  console.log(row("rest regions cut", "-", String(restCutRegions)));
+  console.log(row("rest blocks emitted", "-", String(restCutBlocks)));
+  console.log(
+    row(
+      "+cleanup time (full pockets)",
+      "-",
+      `${(restCutSec / 60).toFixed(1)} min`,
+    ),
+  );
+}
+console.log(
+  row(
+    "naive (CC-like) min",
+    before.naiveMin.toFixed(1),
+    after.naiveMin.toFixed(1),
+  ),
+);
+console.log(
+  row("accel-aware min", before.accelMin.toFixed(1), after.accelMin.toFixed(1)),
+);
+const saved = before.accelMin - after.accelMin;
+console.log(
+  `\nest. machine-time savings: ${saved.toFixed(1)} min (${before.accelMin > 0 ? ((100 * saved) / before.accelMin).toFixed(1) : "0.0"}%)`,
+);
+if (output) console.log(`wrote ${output}`);
