@@ -590,8 +590,9 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
       out.push(panelBox(g, station, ox, oy, bay.w, bay.d));
     }
     if (kind === "saw") {
-      // Saw bays keep front+back ledges only: the stand rises through
-      // the side band.
+      // Saw bays take ledges:"frontback" and get zero ledges: no loose
+      // panel lives here (the stand rises through the side band) and the
+      // table overhang forbids the ledge band (see frameRectBoxes NOTE).
       out.push(
         ...frameRectBoxes(g, station, ox, oy, bay.w, bay.d, {
           ledges: "frontback",
@@ -833,7 +834,7 @@ export function stowBoxes(rotating: Box[], axleY: number, A: number): Box[] {
 
 export interface RectOpts {
   backRail?: boolean;
-  /** ring: all 4; sides: L+R (flip frames); frontback: F+B (saw bays). */
+  /** ring: all 4; sides: L+R (flip frames); frontback: none (saw bays). */
   ledges?: "ring" | "sides" | "frontback";
   w?: number;
   h?: number;
@@ -972,10 +973,17 @@ export function frameRectBoxes(
     "store 2x4",
   );
   // Ledges: ring (all 4), sides (flip frames — front/back would collide
-  // with stowed cheeks), frontback (saw bays — the stand rises through
-  // the side band). Stowed flats cantilever from axle + re-seated wedges.
+  // with stowed cheeks), frontback (saw bays: yields ZERO ledges — no
+  // panel lives there and the table overhang forbids the band; see NOTE
+  // below). Stowed flats cantilever from axle + re-seated wedges.
   const ledgeZ = railTopZ - ledgeH;
   const wantFB = opts.ledges === undefined || opts.ledges === "ring";
+  // NOTE: there is no frontback arm — saw bays take ledges:"frontback"
+  // and get zero ledges on purpose. A saw bay carries no loose panel
+  // (the stand rises through it), and the table overhang eats the ledge
+  // band: in a 28in bay the 622-wide table starts 79.5 into an 89-deep
+  // post zone, colliding with both front and back ledges (proven by
+  // the 76x60 overlap test). Ledges are panel supports; no panel here.
   const wantFront = wantFB;
   const wantBack = wantFB;
   const wantSides = wantFB || opts.ledges === "sides";
@@ -1003,7 +1011,7 @@ export function frameRectBoxes(
       ledgeH,
       "19mm strip",
     );
-  // Side ledges unless frontback (saw bays — the stand is in the way).
+  // Side ledges unless frontback (saw bays — zero ledges there anyway).
   if (wantSides)
     P(
       "ledge-left",

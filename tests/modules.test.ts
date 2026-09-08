@@ -5,6 +5,7 @@ import {
   PLANER_FLIP,
   defaultPlan,
   flipRectBay,
+  frameRectBoxes,
   planAsymmetric,
   stowBoxes,
   sweepCollisions,
@@ -15,7 +16,7 @@ import {
   type FlipTool,
   type GridPlan,
 } from "../src/modules.ts";
-import { assemblyOverlaps } from "../src/assembly.ts";
+import { assemblyOverlaps, boxesOverlap } from "../src/assembly.ts";
 
 const plan = defaultPlan();
 const g = plan.spec;
@@ -316,5 +317,49 @@ describe("full-width asymmetric (96x64 saw side + flip side)", () => {
         [],
       );
     }
+  });
+});
+
+describe("saw-bay frontback yields zero ledges (table overhang forbids the band)", () => {
+  it("frontback emits no ledge parts", () => {
+    const boxes = frameRectBoxes(g, "s", 0, 0, 813, 813, {
+      ledges: "frontback",
+    });
+    assert.deepEqual(
+      boxes.filter((b) => b.partId.includes("-ledge")),
+      [],
+    );
+  });
+
+  it("a hypothetical saw-bay ledge collides with the table in a 28in bay", () => {
+    // The 76x60 saw bay is 28in (711mm); the 622-wide table starts 79.5
+    // into the 89-deep post zone, so any front/back ledge shares volume
+    // with the saw body. This test constructs that ledge explicitly and
+    // proves the collision — the reason frontback stays empty.
+    const aplan = planAsymmetric();
+    const gg = aplan.spec;
+    const sawBay = aplan.bays.find((b) => b.kind === "saw")!;
+    const all = gridBoxes(aplan);
+    const sawBody = all.find((b) => b.partId.endsWith("-sawbody"))!;
+    const railTopZ = gg.H - gg.supportDrop - gg.panelT;
+    const ledgeZ = railTopZ - gg.ledgeH;
+    const totalD = Math.max(...aplan.bays.map((b) => b.y + b.d));
+    const oy = totalD - sawBay.y - sawBay.d;
+    const frontLedge = {
+      partId: "hypo-ledge-front",
+      label: "hypothetical saw front ledge",
+      x: sawBay.x + gg.frontPostFace,
+      y: oy + gg.post - gg.ledgeW,
+      z: ledgeZ,
+      dx: sawBay.w - 2 * gg.frontPostFace,
+      dy: gg.ledgeW,
+      dz: gg.ledgeH,
+      process: "saw" as const,
+      note: "hypothetical",
+    };
+    assert.ok(
+      boxesOverlap(frontLedge, sawBody),
+      "expected the hypothetical ledge to hit the table",
+    );
   });
 });
