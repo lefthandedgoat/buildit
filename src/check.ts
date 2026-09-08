@@ -159,7 +159,10 @@ function insidePoly(p: Pt, poly: Pt[]): boolean {
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const [xi, yi] = poly[i];
     const [xj, yj] = poly[j];
-    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi)
+    if (
+      yi > p[1] !== yj > p[1] &&
+      p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi
+    )
       inside = !inside;
   }
   return inside;
@@ -239,9 +242,7 @@ function waistHits(loops: Loop[], toolD: number): WaistHit[] {
       const fwd = (v - u + n) % n;
       const bwd = n - fwd;
       if (fwd < minSep || bwd < minSep) return false;
-      return (
-        segSeg(pts[u], pts[(u + 1) % n], pts[v], pts[(v + 1) % n]) < toolD
-      );
+      return segSeg(pts[u], pts[(u + 1) % n], pts[v], pts[(v + 1) % n]) < toolD;
     };
     let runMM = 0;
     for (let t = 0; t < n / 2; t++) {
