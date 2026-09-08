@@ -70,6 +70,19 @@
         width: 10px;
         height: 10px;
         margin: 0 4px 0 12px;
+        border-radius: 2px;
+      }
+      .sw.dash {
+        height: 0;
+        width: 14px;
+        border-top: 3px dashed #d8c84a;
+        vertical-align: middle;
+      }
+      .sw.dots {
+        height: 0;
+        width: 14px;
+        border-top: 3px dotted #777;
+        vertical-align: middle;
       }
     </style>
   </head>
@@ -95,8 +108,9 @@
       <span class="sw" style="background: #ff9a4e"></span>before arcs
       <span class="sw" style="background: #3ee6a8"></span>after cuts
       <span class="sw" style="background: #4ec9ff"></span>after arcs
+      <span class="sw dash"></span>links (long flat chords — render only)
       <span class="sw" style="background: #c77dff"></span>rest (added)
-      <span class="sw" style="background: #555"></span>rapids/travel
+      <span class="sw dots"></span>rapids/travel (render only)
     </div>
     <script src="core.cjs"></script>
     <script>
@@ -124,7 +138,7 @@
           }
         return [x0, y0, x1, y1];
       }
-      function draw(canvas, layers, colors, bb, title) {
+      function draw(canvas, layers, styles, bb, title) {
         const ctx = canvas.getContext("2d");
         const W = (canvas.width = canvas.clientWidth * 2);
         const H = (canvas.height = canvas.clientHeight * 2);
@@ -137,9 +151,11 @@
         const X = (x) => ox + x * sc,
           Y = (y) => oy - y * sc;
         layers.forEach((pts, li) => {
-          ctx.strokeStyle = colors[li];
-          ctx.lineWidth = li >= 4 ? 3 : 1.5;
-          ctx.globalAlpha = li === 5 ? 0.35 : 0.9;
+          const st = styles[li] || {};
+          ctx.strokeStyle = st.color || "#fff";
+          ctx.lineWidth = st.width || 1.5;
+          ctx.globalAlpha = st.alpha !== undefined ? st.alpha : 0.9;
+          ctx.setLineDash(st.dash || []);
           ctx.beginPath();
           let pen = false;
           for (const p of pts) {
@@ -154,32 +170,42 @@
           }
           ctx.stroke();
         });
+        ctx.setLineDash([]);
         ctx.globalAlpha = 1;
         ctx.fillStyle = "#888";
         ctx.font = "24px system-ui";
         ctx.fillText(title, 16, 32);
       }
-      // layers: [cuts, arcs] per file + shared [rest, rapids]
+      // layers: [cuts, arcs, links] per file + shared [rest, rapids].
+      // Verdict inputs are cuts+arcs only; links/rest/rapids are render
+      // layers (links are match targets, never queries — see core). Keep
+      // them visually distinct so added-travel never reads as cut drift.
       function splitLayers(samp) {
         const cuts = [],
           arcs = [],
+          links = [],
           rest = [],
           rap = [];
+        const blanks = () => {
+          cuts.push(null);
+          arcs.push(null);
+          links.push(null);
+          rest.push(null);
+          rap.push(null);
+        };
         for (const p of samp.pts) {
           if (!p) {
-            cuts.push(null);
-            arcs.push(null);
-            rest.push(null);
-            rap.push(null);
+            blanks();
             continue;
           }
           const k = p[3];
-          cuts.push(k === "g1" || k === "link" ? p : null);
+          cuts.push(k === "g1" ? p : null);
           arcs.push(k === "arc" ? p : null);
+          links.push(k === "link" ? p : null);
           rest.push(k === "rest" ? p : null);
           rap.push(k === "g0" ? p : null);
         }
-        return { cuts, arcs, rest, rap };
+        return { cuts, arcs, links, rest, rap };
       }
       function refresh() {
         if (!state.A || !state.B) return;
@@ -189,26 +215,25 @@
         const ms = Math.round(performance.now() - t0);
         const an = T.anomalies(state.A.blocks, tz);
         const v = $("verdict");
-        // Grade on the WORST of preservation/additions. Travel the optimizer
-        // moved (exclMax) caps at amber: lowered clearance is unprovable
-        // statically (workholding), so it needs eyes, not trust.
-        const worst = Math.max(d.maxA, d.maxB);
+        // Grade on the WORST of preservation/additions via shared helper
+        // (thresholds load-bearing: SAFE<=0.25 cuts AND <=0.5 travel,
+        // INSPECT<=1.5). Travel the optimizer moved (exclMax) caps at
+        // amber: lowered clearance is unprovable statically
+        // (workholding), so it needs eyes, not trust.
         const excl = d.exclMax || 0;
-        const grade =
-          worst <= 0.25 && excl <= 0.5
-            ? ["green", "SAFE TO CARVE"]
-            : worst <= 1.5
-              ? ["amber", "INSPECT — see location"]
-              : ["red", "DO NOT RUN"];
-        v.className = grade[0];
+        const grade = T.gradeVerdict(d.maxA, d.maxB, excl);
+        let amberWhy = "";
+        if (grade.key === "amber")
+          amberWhy = Math.max(d.maxA, d.maxB) > 0.25 ? " — see location" : " — travel moved, check clearance";
+        v.className = grade.key;
         v.textContent =
-          `${grade[1]} · preserve ${d.maxA.toFixed(3)} / added ${d.maxB.toFixed(3)} mm` +
-          (excl > 0.5
-            ? ` · travel moved ${excl.toFixed(2)} (check clearance)`
-            : "");
+          `${grade.label}${amberWhy} · preserve ${d.maxA.toFixed(3)} / added ${d.maxB.toFixed(3)} mm` +
+          ` · worst preserved @ ${T.fmtPt(d.worstA)}` +
+          ` · worst added @ ${T.fmtPt(d.worstB)}` +
+          (excl > 0.5 ? ` · travel moved ${excl.toFixed(2)}` : "");
         let meta =
           `stockTop ${tz.toFixed(2)} · mean ${d.mean.toFixed(4)} · ${ms}ms · ` +
-          `worst preserved missing at ${d.worstA ? d.worstA.slice(0, 3).map((x) => +x.toFixed(2)) : "-"}`;
+          `excluded above-stock cut pts ${d.excludedCut || 0}`;
         if (an.count)
           meta += ` · ⚠ ${an.count} deep-plunge pts to ${an.worst.toFixed(1)} (mesh glitch?)`;
         $("meta").textContent = meta;
@@ -217,49 +242,83 @@
         const showRap = $("lrapids").checked,
           showRest = $("lrest").checked;
         // Bounds span all ENABLED layers so toggles never push geometry off-canvas.
-        const bbSets = [la.cuts, la.arcs, lb.cuts, lb.arcs];
+        // Links ride with cuts for bounds (same footprint, different style).
+        const bbSets = [
+          la.cuts,
+          la.arcs,
+          la.links,
+          lb.cuts,
+          lb.arcs,
+          lb.links,
+        ];
         if (showRest) bbSets.push(lb.rest);
         if (showRap) bbSets.push(la.rap, lb.rap);
         const bb = bounds(bbSets);
+        // Render styles: cuts solid, arcs solid, links dashed olive,
+        // rest thick purple, rapids faint dotted gray. Verdict-blind
+        // layers (links/rest/rapids) never share a cut color.
+        const S = {
+          beforeCut: { color: "#ff5a4e", width: 3, alpha: 0.95 },
+          beforeArc: { color: "#ff9a4e", width: 3, alpha: 0.95 },
+          afterCut: { color: "#3ee6a8", width: 2, alpha: 0.9 },
+          afterArc: { color: "#4ec9ff", width: 2, alpha: 0.9 },
+          link: { color: "#d8c84a", width: 1.5, alpha: 0.7, dash: [8, 5] },
+          rest: { color: "#c77dff", width: 4, alpha: 0.95 },
+          rap: { color: "#888", width: 1.5, alpha: 0.3, dash: [2, 5] },
+        };
         if (state.overlay) {
           $("views").className = "overlay";
-          const layers = [la.cuts, la.arcs, lb.cuts, lb.arcs];
-          const colors = ["#ff5a4e", "#ff9a4e", "#3ee6a8", "#4ec9ff"];
+          const layers = [
+            la.cuts,
+            la.arcs,
+            lb.cuts,
+            lb.arcs,
+            la.links,
+            lb.links,
+          ];
+          const styles = [
+            S.beforeCut,
+            S.beforeArc,
+            S.afterCut,
+            S.afterArc,
+            S.link,
+            S.link,
+          ];
           if (showRest) {
             layers.push(lb.rest);
-            colors.push("#c77dff");
+            styles.push(S.rest);
           }
           if (showRap) {
             layers.push(la.rap, lb.rap);
-            colors.push("#555", "#555");
+            styles.push(S.rap, S.rap);
           }
           draw(
             $("beforec"),
             layers,
-            colors,
+            styles,
             bb,
             "overlay: before(red) + after(green)",
           );
         } else {
           $("views").className = "split";
-          const ca = [la.cuts, la.arcs],
-            cca = ["#ff5a4e", "#ff9a4e"];
-          const cb = [lb.cuts, lb.arcs],
-            ccb = ["#3ee6a8", "#4ec9ff"];
+          const ca = [la.cuts, la.arcs, la.links],
+            sa = [S.beforeCut, S.beforeArc, S.link];
+          const cb = [lb.cuts, lb.arcs, lb.links],
+            sb = [S.afterCut, S.afterArc, S.link];
           if (showRest) {
             ca.push([]);
-            cca.push("#c77dff");
+            sa.push(S.rest);
             cb.push(lb.rest);
-            ccb.push("#c77dff");
+            sb.push(S.rest);
           }
           if (showRap) {
             ca.push(la.rap);
-            cca.push("#555");
+            sa.push(S.rap);
             cb.push(lb.rap);
-            ccb.push("#555");
+            sb.push(S.rap);
           }
-          draw($("beforec"), ca, cca, bb, "before");
-          draw($("afterc"), cb, ccb, bb, "after");
+          draw($("beforec"), ca, sa, bb, "before");
+          draw($("afterc"), cb, sb, bb, "after");
         }
       }
       function load(input, slot) {

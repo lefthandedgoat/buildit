@@ -655,6 +655,24 @@
     }
   }
 
+  // ---- verdict messaging helpers (pure, render-only) ---------------------
+  // Thresholds are load-bearing: SAFE<=0.25mm cuts AND <=0.5mm travel,
+  // INSPECT<=1.5mm. Keep in sync with viewer.html + tests/viewer.test.ts.
+  function fmtPt(p) {
+    if (!p) return "-";
+    const f = (x) => (Math.round(x * 100) / 100).toFixed(2);
+    return "X" + f(p[0]) + " Y" + f(p[1]) + " Z" + f(p[2]);
+  }
+
+  function gradeVerdict(maxA, maxB, exclMax) {
+    const worst = Math.max(maxA, maxB);
+    const excl = exclMax || 0;
+    if (worst <= 0.25 && excl <= 0.5)
+      return { key: "green", label: "SAFE TO CARVE" };
+    if (worst <= 1.5) return { key: "amber", label: "INSPECT" };
+    return { key: "red", label: "DO NOT RUN" };
+  }
+
   return {
     parseNC,
     arcPoints,
@@ -663,5 +681,7 @@
     stockTop,
     anomalies,
     tagAddedPlunges,
+    fmtPt,
+    gradeVerdict,
   };
 });

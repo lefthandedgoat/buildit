@@ -34,6 +34,16 @@ yours: time a representative cut, tweak `--accel` until the
 accel-aware estimate matches (higher accel lowers it), send the
 triple — one stopwatch preset beats ten datasheet fantasies.
 
+Output and exit codes: `-o` is optional — without it the report
+prints but no file is written. Exit 0 clean (`--check` clean too);
+exit 1 means `--check` violations (file still written); exit 2 means
+a usage error — missing input (or a leading flag such as `--help`),
+unknown `--machine`, a non-numeric `--accel`/`--rapid`/`--tolerance`/
+`--decimals`/`--arc-tol`/`--rest-2d`/`--rest-finish`/
+`--check`/`--check-prev` value, an invalid `--clearance` value
+(`auto` or a number — anything else exits 2), `--check-prev` without `--check`, or
+`--rest-cut` without both `--rest-2d` and `--finish-tool`.
+
 Example output:
 
 ```text
@@ -96,8 +106,8 @@ CC emits; preserved verbatim) and radii ≥ 0.05 mm.
 Pipeline order: janitor -> arcs -> rapids -> plunge -> emit, with rest
 analysis (report only) read off the post-janitor stream.
 
-- **Rapids + retracts** (`src/rapids.ts`, `--tsp`/`--no-tsp`,
-  `--clearance auto|MM`). Splits the program into *sites* at G0 XY
+- **Rapids + retracts** (`src/rapids.ts`, `--tsp`/`--no-tsp`, on by
+  default, `--clearance auto|MM`). Splits the program into *sites* at G0 XY
   traverses: a site is one traverse plus following work with no XY
   motion below the relocation plane, ending back at/above it. Whole
   sites are reordered (nearest-neighbor + 2-opt, deterministic, first
@@ -116,7 +126,8 @@ analysis (report only) read off the post-janitor stream.
   site) with clearance-only savings; `shark-bottom-finish-fine`
   reorders 0 ops, proving the safety gate.
 - **2.5D rest analysis** (`src/rest2d.ts`, `--rest-2d PREV_D
-  [--rest-finish D]`, report only — no cut paths yet). Finds closed
+  [--rest-finish D]`, off by default, `--rest-finish` default 1.0mm,
+  report only — no cut paths yet). Finds closed
   constant-Z G1 pocket loops and computes exact concave-corner rest:
   per corner, `(Rp^2-Rf^2)(cot(b)-pi/2+b)` with wedge half-angle `b`
   (reduces to the familiar `(1-pi/4)` term for 90-degree inside
@@ -128,7 +139,10 @@ analysis (report only) read off the post-janitor stream.
   dilation/Intersection/Union were sound. Corner analysis needs none
   of it. v4 (cut paths) may revisit the clipper question.
 - **Plunge + peck tuning** (`src/plunge.ts`, `src/materials.ts`,
-  `--material walnut|locust`, `--peck-profile NAME`, `--no-plunge`).
+  `--material walnut|locust` default `walnut`, `--peck-profile NAME`,
+  `--no-plunge`; plunge retune on by default). Unknown material or
+  peck-profile names fall back to the conservative generic profile
+  (250 mm/min, 1.2mm); `--peck-profile` overrides only the Q depth.
   Pure Z-only G1 descents faster than the profile plunge feed are
   clamped DOWN (walnut 350, locust 250 mm/min); G83 Q deeper than the
   profile max is clamped DOWN (walnut 2.0, locust 1.2mm). Feeds and Q
@@ -144,14 +158,25 @@ IJK (v2 rules unchanged).
   as if absolute — flagged, not silently handled.
 - No G2/G3 in the test corpus; arc *parsing* is supported, arc *generation*
   is v2.
-- The accel model is per-block trapezoidal; it ignores junction-deviation
-  blending, so it still reads ~5–10% high on very dense paths. Calibrate
-  with a stopwatch and your machine's `$120–$122`.
+- The accel model is per-block trapezoidal with stop-to-stop junctions by
+  default — the stopwatch-calibrated behavior (the 54-min shark finish),
+  so dense raster paths keep their calibration. Grbl-style
+  junction-deviation blending is opt-in (`junctionDeviation`, stock
+  0.010 mm): corner speed `sqrt(a·d·sin(θ/2)/(1−sin(θ/2)))` capped by
+  adjacent feeds, with forward/backward accel passes; rapids stay
+  stop-to-stop and naive is untouched. Measured: opt-in 0.010 collapses
+  dense estimates to ~naive (shark finish 54.0 → 39.1 min against a
+  54-min stopwatch), contradicting the stopwatch — hence opt-in, never
+  the default. Because blending exists opt-in, the v2 biarc decline's
+  "estimator ignores blending" leg is technically reopened, but the
+  calibrated default still ignores it, so the decline stands (no biarc
+  implemented). Calibrate with a stopwatch and your machine's
+  `$120–$122`.
 
 ## What it does (v4: rest cleanup cut paths)
 
 `--rest-cut` (off by default; requires `--rest-2d PREV_D` plus
-`--finish-tool D`) turns the v3 analysis into emitted G1 cleanup
+`--finish-tool D`, missing either exits 2) turns the v3 analysis into emitted G1 cleanup
 toolpaths, inserted immediately after each parent pocket loop (pre-arcs,
 while G1 loops still exist). Per concave corner it emits serpentine
 stitch passes with the finish tool at the parent loop's own depth —
@@ -224,6 +249,8 @@ regions v4 cuts there.
   stay split (v4.1 directedSweep territory) and only 84 are smooth
   S-artifacts (1.6% of joints) — a solver risks the fitter for an
   unmeasurable-in-tree gain (the estimator ignores blending).
+- **v3: done** — rapids reorder + adaptive clearance, 2.5D rest
+  analysis (report only), plunge/peck retune (see above).
 - **v4: done** — rest cleanup cut paths (`--rest-cut`), containment-
   filtered, declined-on-faceted-curves (see above). No general clipper
   was needed: exact corner math covers pockets; the clipper question
@@ -232,7 +259,6 @@ regions v4 cuts there.
 - **v5.1: done** — machine profiles (`--machine`, default `shapeoko`:
   A400 R5000 stopwatch-calibrated; explicit flags override, unknown
   names exit 2). Only measured presets ship.
-- `--check` mode: min-feature audit (flag geometry finer than a given tool).
 
 ## Viewer (`viewer/`)
 

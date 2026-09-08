@@ -32,6 +32,12 @@ const core = require("../viewer/core.cjs") as {
   stockTop(blocks: unknown[]): number;
   tagAddedPlunges(a: unknown[], b: unknown[]): void;
   anomalies(blocks: unknown[]): { count: number; worst: number };
+  fmtPt(p: [number, number, number, string] | null): string;
+  gradeVerdict(
+    maxA: number,
+    maxB: number,
+    exclMax: number,
+  ): { key: string; label: string };
 };
 
 import { CORPUS } from "./corpus.ts";
@@ -229,6 +235,30 @@ describe("viewer verdicts on shipped pairs", () => {
     assert.ok(
       Math.abs(an.worst - -38.1) < 0.01,
       `worst ${an.worst} should be the -38.1 spike`,
+    );
+  });
+});
+
+describe("viewer messaging helpers (render-only, grade-safe)", () => {
+  it("grade thresholds stay load-bearing", () => {
+    assert.equal(core.gradeVerdict(0.1, 0.1, 0).key, "green");
+    assert.equal(core.gradeVerdict(0.25, 0.25, 0.5).key, "green");
+    // Just beyond each boundary flips the grade.
+    assert.equal(core.gradeVerdict(0.250001, 0.25, 0.5).key, "amber");
+    assert.equal(core.gradeVerdict(0.25, 0.25, 0.500001).key, "amber");
+    assert.equal(core.gradeVerdict(1.5, 0, 0).key, "amber");
+    assert.equal(core.gradeVerdict(1.500001, 0, 0).key, "red");
+    // Moved travel caps at amber even when cuts are perfect.
+    assert.equal(core.gradeVerdict(0, 0, 3.4).key, "amber");
+    assert.equal(core.gradeVerdict(0.33, 0.58, 0.3).key, "amber");
+    assert.equal(core.gradeVerdict(2, 0, 0).key, "red");
+  });
+
+  it("worst-point callouts format coordinates", () => {
+    assert.equal(core.fmtPt(null), "-");
+    assert.equal(
+      core.fmtPt([1.234, -2, 3.5, "g1"]),
+      "X1.23 Y-2.00 Z3.50",
     );
   });
 });

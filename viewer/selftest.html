@@ -1,6 +1,9 @@
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>selftest</title></head><body>
 <script src="core.cjs"></script>
 <script>
+// Zero-dependency double-click selftest: parses a before/after pair with an
+// arc corner + a BUILDIT REST span, then asserts verdict-grade invariants.
+// Open directly in a browser (no server); PASS requires every check green.
 const T = window.builditCore;
 // before: square pocket 0..10 at Z-2 + rapid home; after: same + one arc corner + rest plunge
 const before = `G90
@@ -35,14 +38,44 @@ G0Z5.027
 G0Z4
 M02
 `;
-const A = T.parseNC(before), B = T.parseNC(after);
-const sa = T.samplePath(A, 0.1, 60000), sb = T.samplePath(B, 0.1, 60000);
-const tz = T.stockTop(A);
-const d = T.deviation(sa.pts, sb.pts, tz);
-document.title = 'DONE';
-document.body.innerHTML = '<pre id=r>' + JSON.stringify({
-  blocksA: A.length, blocksB: B.length, stockTop: tz,
-  maxA: +d.maxA.toFixed(4), maxB: +d.maxB.toFixed(4),
-  restB: sb.counts.rest, arcsB: sb.counts.arc,
-}) + '</pre>';
+const results = [];
+function check(name, cond, detail) {
+  results.push({ name, pass: !!cond, detail: detail || "" });
+}
+try {
+  const A = T.parseNC(before), B = T.parseNC(after);
+  check("before parses to blocks", A.length > 0, "blocksA=" + A.length);
+  check("after parses to blocks", B.length > 0, "blocksB=" + B.length);
+  const restB = B.filter((b) => b.rest).length;
+  check("rest markers tag B span", restB >= 3, "restB=" + restB);
+  check("shared helpers present", typeof T.fmtPt === "function" && typeof T.gradeVerdict === "function", "fmtPt+gradeVerdict");
+  const sa = T.samplePath(A, 0.1, 60000), sb = T.samplePath(B, 0.1, 60000);
+  check("after samples rest points", (sb.counts.rest || 0) > 0, "rest=" + sb.counts.rest);
+  const tz = T.stockTop(A);
+  check("stockTop finite", Number.isFinite(tz), "stockTop=" + tz);
+  const d = T.deviation(sa.pts, sb.pts, tz);
+  // Arc-corner substitution keeps both sides within inspect band; rest
+  // stays out of verdict inputs so additions stay small.
+  check("preserve within inspect band", d.maxA <= 1.5, "maxA=" + d.maxA.toFixed(4));
+  check("additions within inspect band", d.maxB <= 1.5, "maxB=" + d.maxB.toFixed(4));
+  const g = T.gradeVerdict(d.maxA, d.maxB, d.exclMax);
+  check("grade helper matches thresholds", ["green", "amber", "red"].includes(g.key), g.label + " worstA@" + T.fmtPt(d.worstA));
+  check("worst callouts formatted", T.fmtPt(d.worstA).includes("X") && T.fmtPt(d.worstB).includes("X"), T.fmtPt(d.worstA) + " / " + T.fmtPt(d.worstB));
+  results.push({ name: "summary", pass: true, detail: JSON.stringify({
+    blocksA: A.length, blocksB: B.length, stockTop: +tz.toFixed(3),
+    maxA: +d.maxA.toFixed(4), maxB: +d.maxB.toFixed(4),
+    worstA: T.fmtPt(d.worstA), worstB: T.fmtPt(d.worstB),
+    restB: sb.counts.rest, arcsB: sb.counts.arc, grade: g.label,
+  }) });
+} catch (e) {
+  results.push({ name: "no-throw", pass: false, detail: String((e && e.message) || e) });
+}
+const fails = results.filter((r) => !r.pass).length;
+document.title = fails ? "FAIL" : "DONE";
+const h1 = document.createElement("h1");
+h1.textContent = fails ? "FAIL" : "PASS";
+const pre = document.createElement("pre");
+pre.id = "r";
+pre.textContent = results.map((r) => (r.pass ? "ok   " : "FAIL ") + r.name + (r.detail ? " — " + r.detail : "")).join("\n");
+document.body.replaceChildren(h1, pre);
 </script></body></html>

@@ -1,6 +1,8 @@
 <!DOCTYPE html><html><head><meta charset="utf-8"><title>t2</title></head><body>
 <script src="core.cjs"></script>
 <script>
+// Zero-dependency double-click selftest #2: identical inputs must deviate
+// exactly zero (both directions) and grade SAFE. Open directly, no server.
 const T = window.builditCore;
 const g = `G90
 G21
@@ -14,9 +16,26 @@ G1X0Y0
 G0Z4
 M02
 `;
-const A = T.parseNC(g), B = T.parseNC(g);
-const sa = T.samplePath(A, 0.1, 60000), sb = T.samplePath(B, 0.1, 60000);
-const d = T.deviation(sa.pts, sb.pts, T.stockTop(A));
-document.title = 'DONE';
-document.body.innerHTML = '<pre>' + JSON.stringify({maxA: +d.maxA.toFixed(5), maxB: +d.maxB.toFixed(5)}) + '</pre>';
+const results = [];
+function check(name, cond, detail) {
+  results.push({ name, pass: !!cond, detail: detail || "" });
+}
+try {
+  const A = T.parseNC(g), B = T.parseNC(g);
+  const sa = T.samplePath(A, 0.1, 60000), sb = T.samplePath(B, 0.1, 60000);
+  const d = T.deviation(sa.pts, sb.pts, T.stockTop(A));
+  check("identical preserve is zero", d.maxA === 0, "maxA=" + d.maxA);
+  check("identical additions are zero", d.maxB === 0, "maxB=" + d.maxB);
+  const gr = T.gradeVerdict(d.maxA, d.maxB, d.exclMax);
+  check("identical grades SAFE", gr.key === "green", gr.label);
+} catch (e) {
+  results.push({ name: "no-throw", pass: false, detail: String((e && e.message) || e) });
+}
+const fails = results.filter((r) => !r.pass).length;
+document.title = fails ? "FAIL" : "DONE";
+const h1 = document.createElement("h1");
+h1.textContent = fails ? "FAIL" : "PASS";
+const pre = document.createElement("pre");
+pre.textContent = results.map((r) => (r.pass ? "ok   " : "FAIL ") + r.name + (r.detail ? " — " + r.detail : "")).join("\n");
+document.body.replaceChildren(h1, pre);
 </script></body></html>
