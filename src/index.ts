@@ -2,6 +2,7 @@
 // buildit CLI: optimize grbl G-code and report honest cycle times.
 //
 // Usage: buildit <input.nc> [-o output.nc] [--machine NAME] [--accel 400]
+//        [--rapid 5000] [--junction-deviation MM]
 //        [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02]
 //        [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust]
 //        [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D]
@@ -23,7 +24,7 @@ import { getMachine, machineNames, resolveRates } from "./machines.ts";
 
 function usage(): never {
   console.error(
-    "Usage: buildit <input.nc> [-o output.nc] [--machine NAME] [--accel 400] [--rapid 5000] [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02] [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust] [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D] [--rest-cut --finish-tool D] [--check D [--check-prev P]]",
+    "Usage: buildit <input.nc> [-o output.nc] [--machine NAME] [--accel 400] [--rapid 5000] [--junction-deviation MM] [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02] [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust] [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D] [--rest-cut --finish-tool D] [--check D [--check-prev P]]",
   );
   process.exit(2);
 }
@@ -62,6 +63,11 @@ if (
   usage(); // typo'd override must fail, never silently fall back
 const accel = rates.accel;
 const rapid = rates.rapidRate;
+// Opt-in grbl-style blending (default 0 = legacy stop-to-stop, the
+// stopwatch-calibrated behavior). Stock grbl $11 is 0.010.
+const jdRaw = arg("--junction-deviation", null);
+const jd = jdRaw === null ? 0 : Number(jdRaw);
+if (jdRaw !== null && (!Number.isFinite(jd) || jd < 0)) usage();
 const tolerance = Number(arg("--tolerance", "0.01"));
 const decimals = Number(arg("--decimals", "3"));
 const useArcs = process.argv.includes("--no-arcs")
@@ -101,7 +107,7 @@ if (useRestCut && (restPrev === null || finishTool === null)) {
   process.exit(2);
 }
 if (
-  ![accel, rapid, tolerance, decimals, arcTol, restFinish].every(
+  ![accel, rapid, tolerance, decimals, arcTol, restFinish, jd].every(
     Number.isFinite,
   ) ||
   (restPrev !== null && !Number.isFinite(restPrev)) ||
@@ -113,11 +119,11 @@ if (
 
 const text = readFileSync(input, "utf8");
 const prog = parse(text);
-const before = estimate(prog, { accel, rapidRate: rapid });
+const before = estimate(prog, { accel, rapidRate: rapid, junctionDeviation: jd });
 
 const { text: janitorText, stats } = janitor(prog, { tolerance, decimals });
 const janitorProg = parse(janitorText);
-const mid = estimate(janitorProg, { accel, rapidRate: rapid });
+const mid = estimate(janitorProg, { accel, rapidRate: rapid, junctionDeviation: jd });
 
 // v4 rest cleanup cuts (opt-in): insert finish-tool cleanup immediately
 // after each parent pocket loop, pre-arcs while G1 loops still exist.
@@ -158,7 +164,11 @@ if (useArcs) {
   stageProg = { blocks: fit.blocks };
   stageText = emit(stageProg, decimals, true);
 }
-const postArcs = estimate(parse(stageText), { accel, rapidRate: rapid });
+const postArcs = estimate(parse(stageText), {
+  accel,
+  rapidRate: rapid,
+  junctionDeviation: jd,
+});
 
 // v3 rapids: TSP reorder + adaptive clearance.
 const rap = optimizeRapids(stageProg.blocks, {
@@ -170,7 +180,11 @@ const rap = optimizeRapids(stageProg.blocks, {
 });
 stageProg = { blocks: rap.blocks };
 stageText = emit(stageProg, decimals, true);
-const postRapids = estimate(parse(stageText), { accel, rapidRate: rapid });
+const postRapids = estimate(parse(stageText), {
+  accel,
+  rapidRate: rapid,
+  junctionDeviation: jd,
+});
 
 // v3 plunge/peck retune (safe direction only).
 let plungesRetuned = 0;
@@ -193,7 +207,7 @@ const rest =
 
 const outText = stageText;
 const afterProg = parse(outText);
-const after = estimate(afterProg, { accel, rapidRate: rapid });
+const after = estimate(afterProg, { accel, rapidRate: rapid, junctionDeviation: jd });
 
 if (output) writeFileSync(output, outText);
 
@@ -201,6 +215,9 @@ const row = (k: string, a: string, b: string) =>
   `${k.padEnd(22)} ${a.padStart(14)} ${b.padStart(14)}`;
 console.log(row("metric", "before", "after"));
 console.log(row("machine", rates.source, `A${accel} R${rapid}`));
+if (jd > 0) {
+  console.log(row("junction-dev (mm)", "-", jd.toFixed(3)));
+}
 console.log(
   row(
     "motion blocks",

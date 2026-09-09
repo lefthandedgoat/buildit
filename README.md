@@ -18,7 +18,7 @@ reproduces both numbers (naive 39.0 / accel-aware 54.0 on
 ```sh
 npm run build
 node dist/index.js <input.nc> [-o output.nc] [--machine NAME] [--accel 400] [--rapid 5000] \
-  [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02] \
+  [--junction-deviation MM] [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02] \
   [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust] \
   [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D] \
   [--rest-cut --finish-tool D] [--check D [--check-prev P]]
@@ -38,9 +38,9 @@ Output and exit codes: `-o` is optional — without it the report
 prints but no file is written. Exit 0 clean (`--check` clean too);
 exit 1 means `--check` violations (file still written); exit 2 means
 a usage error — missing input (or a leading flag such as `--help`),
-unknown `--machine`, a non-numeric `--accel`/`--rapid`/`--tolerance`/
+unknown `--machine`, a non-numeric `--accel`/`--rapid`/`--junction-deviation`/`--tolerance`/
 `--decimals`/`--arc-tol`/`--rest-2d`/`--rest-finish`/
-`--check`/`--check-prev` value, an invalid `--clearance` value
+`--check`/`--check-prev` value, a negative `--junction-deviation`, an invalid `--clearance` value
 (`auto` or a number — anything else exits 2), `--check-prev` without `--check`, or
 `--rest-cut` without both `--rest-2d` and `--finish-tool`.
 
@@ -69,7 +69,9 @@ est. machine-time savings: 4.5 min (8.4%)
   when collapsing edits a run of partial-coordinate lines, kept blocks get
   full XYZ so downstream modal inheritance stays exact.
 - **Estimator** (`src/estimate.ts`) — naive plus trapezoidal accel-aware
-  model (default 400 mm/s², rapid 5000 mm/min).
+  model (default 400 mm/s², rapid 5000 mm/min). Grbl-style
+  junction-deviation blending is opt-in via `--junction-deviation MM`
+  (default 0 = legacy stop-to-stop; stock grbl $11 is 0.010).
 
 ## What it does (v2: arc fitting)
 
@@ -161,7 +163,8 @@ IJK (v2 rules unchanged).
 - The accel model is per-block trapezoidal with stop-to-stop junctions by
   default — the stopwatch-calibrated behavior (the 54-min shark finish),
   so dense raster paths keep their calibration. Grbl-style
-  junction-deviation blending is opt-in (`junctionDeviation`, stock
+  junction-deviation blending is opt-in (`--junction-deviation MM` on the CLI,
+  `junctionDeviation` in the API, stock
   0.010 mm): corner speed `sqrt(a·d·sin(θ/2)/(1−sin(θ/2)))` capped by
   adjacent feeds, with forward/backward accel passes; rapids stay
   stop-to-stop and naive is untouched. Measured: opt-in 0.010 collapses
