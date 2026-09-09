@@ -135,7 +135,7 @@ analysis (report only) read off the post-janitor stream.
   (reduces to the familiar `(1-pi/4)` term for 90-degree inside
   corners). Convex loops report exactly 0; rest is monotone in prev
   diameter and empty when prev <= finish (all asserted). Deliberately
-  no general polygon clipper: `clipper2-js` was vetted and rejected —
+  no general polygon clipper: `clipper2-js@1.2.4` was vetted (2026-09-08, 10 PROTOTYPE-* scratch probes, since removed) and rejected —
   its erosion applied nonlinear wrong magnitudes and boolean
   Difference/Xor returned unions (10x10 minus 6x6 -> 136), while only
   dilation/Intersection/Union were sound. Corner analysis needs none
