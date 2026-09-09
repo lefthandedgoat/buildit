@@ -211,4 +211,18 @@ describe("station sections", () => {
         .join(";");
     assert.equal(key("stop-w"), key("stop-e"));
   });
+
+  it("light theme paints a white stage; dark stays default", () => {
+    const bst = boxesToStl(bench, "bench");
+    const light = stlViewerHtml(bst, "bench", bench, "light");
+    assert.ok(light.includes("background:#f5f5f4"));
+    assert.ok(!light.includes("background:#111"));
+    assert.ok(light.includes('const THEME_CLEAR="#f5f5f4"'));
+    // Default (3-arg) form is unchanged dark.
+    const dark = stlViewerHtml(bst, "bench", bench);
+    assert.ok(dark.includes("background:#111"));
+    assert.ok(dark.includes('const THEME_CLEAR="#111"'));
+    // Still self-contained.
+    assert.ok(!/src="http/.test(light));
+  });
 });

@@ -106,6 +106,7 @@ function mainGrid(): void {
       boxesToStl(stowedBoxes, "grid-stowed"),
       "saw grid stowed — drag to rotate",
       stowedBoxes,
+      "light",
     ),
   );
   writeFileSync(join(outDir, "grid.stl"), boxesToStl(boxes, "grid"));
@@ -115,6 +116,7 @@ function mainGrid(): void {
       boxesToStl(boxes, "grid"),
       "saw grid — drag to rotate",
       boxes,
+      "light",
     ),
   );
   const cutlist =
@@ -278,6 +280,7 @@ function main(): void {
       boxesToStl(assembly, "bench"),
       "bench — drag to rotate",
       assembly,
+      "light",
     ),
   );
   writeFileSync(join(plan.outDir, "bench-T2-profile.nc"), nc2);

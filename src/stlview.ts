@@ -129,10 +129,58 @@ export function stationsOf(boxes: Pick<Box, "station">[]): string[] {
   return out;
 }
 
+/** Viewer color theme: dark (default, matches history) or light (white
+ * stage like the shop 3D tab). Threaded into CSS + canvas paint. */
+export type ViewerTheme = "dark" | "light";
+
+interface ViewerPalette {
+  page: string;
+  ink: string;
+  chrome: string;
+  edge: string;
+  hover: string;
+  btnBg: string;
+  btnInk: string;
+  btnEdge: string;
+  clear: string;
+  hiStroke: string;
+  edgeStroke: string;
+}
+
+const PALETTES: Record<ViewerTheme, ViewerPalette> = {
+  dark: {
+    page: "#111",
+    ink: "#eee",
+    chrome: "#1c1c1c",
+    edge: "#333",
+    hover: "#2a2a2a",
+    btnBg: "#333",
+    btnInk: "#eee",
+    btnEdge: "#555",
+    clear: "#111",
+    hiStroke: "rgba(255,255,255,.9)",
+    edgeStroke: "rgba(0,0,0,.25)",
+  },
+  light: {
+    page: "#f5f5f4",
+    ink: "#292524",
+    chrome: "#ffffff",
+    edge: "#e7e5e4",
+    hover: "#f0ede9",
+    btnBg: "#ffffff",
+    btnInk: "#44403c",
+    btnEdge: "#d6d3d1",
+    clear: "#f5f5f4",
+    hiStroke: "rgba(12,74,110,.9)",
+    edgeStroke: "rgba(68,64,60,.35)",
+  },
+};
+
 export function stlViewerHtml(
   stlText: string,
   title: string,
   boxes?: Box[],
+  theme: ViewerTheme = "dark",
 ): string {
   const escTitle = title
     .replace(/&/g, "&amp;")
@@ -140,32 +188,33 @@ export function stlViewerHtml(
     .replace(/>/g, "&gt;");
   const boxJson = JSON.stringify(boxes ?? []).replace(/</g, "\\x3c");
   const picking = boxes !== undefined;
+  const pal = PALETTES[theme] ?? PALETTES.dark;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>${escTitle}</title>
 <style>
-  html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:#111;color:#eee}
+  html,body{margin:0;height:100%;font-family:system-ui,sans-serif;background:${pal.page};color:${pal.ink}}
   #wrap{display:flex;height:calc(100vh - 42px)}
   #c{display:block;flex:1;min-width:0;height:100%;touch-action:none;cursor:grab}
-  #bar{height:42px;display:flex;align-items:center;gap:12px;padding:0 12px;background:#1c1c1c;font-size:13px}
+  #bar{height:42px;display:flex;align-items:center;gap:12px;padding:0 12px;background:${pal.chrome};border-bottom:1px solid ${pal.edge};font-size:13px}
   #bar b{font-weight:600}
   #bar .hint{opacity:.65}
-  button{background:#333;color:#eee;border:1px solid #555;border-radius:6px;padding:4px 10px;cursor:pointer}
-  button[aria-pressed="true"]{background:#0a5dc2;border-color:#0a5dc2}
-  #panel{display:none;width:300px;flex:none;overflow:auto;background:#1c1c1c;border-left:1px solid #333;padding:12px;font-size:13px}
+  button{background:${pal.btnBg};color:${pal.btnInk};border:1px solid ${pal.btnEdge};border-radius:6px;padding:4px 10px;cursor:pointer}
+  button[aria-pressed="true"]{background:#0a5dc2;border-color:#0a5dc2;color:#fff}
+  #panel{display:none;width:300px;flex:none;overflow:auto;background:${pal.chrome};border-left:1px solid ${pal.edge};padding:12px;font-size:13px}
   #panel.show{display:block}
   #panel h2{margin:0 0 4px;font-size:15px}
   #panel .meta{opacity:.8;margin:2px 0}
-  #panel .meta b{color:#fff;font-weight:600}
-  #panel svg{background:#fff;border-radius:6px;margin:8px auto 0;display:block;max-width:100%;height:auto}
+  #panel .meta b{font-weight:600}
+  #panel svg{background:#fff;border:1px solid ${pal.edge};border-radius:6px;margin:8px auto 0;display:block;max-width:100%;height:auto}
   #panel .row{display:flex;gap:8px;margin-top:10px}
   #sel{opacity:.8}
-  #tree{width:232px;flex:none;overflow:auto;background:#1c1c1c;border-right:1px solid #333;padding:8px 4px;font-size:13px}
+  #tree{width:232px;flex:none;overflow:auto;background:${pal.chrome};border-right:1px solid ${pal.edge};padding:8px 4px;font-size:13px}
   #tree .thead{padding:2px 8px 6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #tree ul{list-style:none;margin:0;padding:0}
   #tree ul ul{padding-left:16px}
   #tree .trow{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:5px;cursor:pointer;white-space:nowrap}
-  #tree .trow:hover{background:#2a2a2a}
-  #tree .trow.sel{background:#0a5dc2}
+  #tree .trow:hover{background:${pal.hover}}
+  #tree .trow.sel{background:#0a5dc2;color:#fff}
   #tree .trow .lbl{flex:1;overflow:hidden;text-overflow:ellipsis}
   #tree .trow.off .lbl{opacity:.45;text-decoration:line-through}
   #tree .twisty{width:14px;flex:none;opacity:.7;user-select:none}
@@ -178,6 +227,9 @@ export function stlViewerHtml(
 <div id="wrap">${picking ? '<aside id="tree"></aside>' : ""}<canvas id="c"></canvas>${picking ? '<div id="grip" title="drag to resize panel"></div>' : ""}<aside id="panel"></aside></div>
 <script>
 "use strict";
+const THEME_CLEAR=${JSON.stringify(pal.clear)};
+const THEME_HI=${JSON.stringify(pal.hiStroke)};
+const THEME_EDGE=${JSON.stringify(pal.edgeStroke)};
 const STL = \`${jsEscape(stlText)}\`;
 const BOXES = ${boxJson};
 function parseAscii(stl){
@@ -531,7 +583,7 @@ function frame(t){
   };
   const W=cv.width, H=cv.height;
   const scale=Math.min(W,H)/(span*dist*1.35);
-  ctx.fillStyle="#111"; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=THEME_CLEAR; ctx.fillRect(0,0,W,H);
   const selKey=(PICK_OK&&selected>=0)?keyOf(selected):null;
   const sibSet=new Set(selKey?identicalTo(selected):[]);
   const selSt=(PICK_OK&&selectedStation>=0)?STATIONS[selectedStation].name:null;
@@ -571,7 +623,7 @@ function frame(t){
     else if(isSib||isStKin) ctx.fillStyle="rgb(245,158,11)";
     else ctx.fillStyle="rgb("+g+","+Math.round(g*0.93)+","+Math.round(g*0.78)+")";
     ctx.fill();
-    ctx.strokeStyle=(isSel||isSib||isStSel||isStKin)?"rgba(255,255,255,.9)":"rgba(0,0,0,.25)";
+    ctx.strokeStyle=(isSel||isSib||isStSel||isStKin)?THEME_HI:THEME_EDGE;
     ctx.lineWidth=(isSel||isSib||isStSel||isStKin)?2:1; ctx.stroke();
   }
   requestAnimationFrame(frame);
