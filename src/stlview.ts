@@ -290,7 +290,7 @@ function buildTree(){
   else STATIONS.forEach((st,si)=>{
     const sli=document.createElement("li");
     const srow=document.createElement("div"); srow.className="trow"; srow.setAttribute("data-station",String(si));
-    const stw=document.createElement("span"); stw.className="twisty"; stw.textContent="\u25be";
+    const stw=document.createElement("span"); stw.className="twisty"; stw.textContent="\u25b8";
     stw.title="expand/collapse station";
     const scb=document.createElement("input"); scb.type="checkbox"; scb.checked=true;
     scb.title="show/hide "+(st.name||"all")+" station";
@@ -298,7 +298,7 @@ function buildTree(){
     const slb=document.createElement("span"); slb.className="lbl";
     const count=stationBoxes(si).length;
     slb.textContent=(st.name||"parts")+" \u2014 "+count+" part"+(count===1?"":"s");
-    const ssub=document.createElement("ul");
+    const ssub=document.createElement("ul"); ssub.style.display="none";
     st.members.forEach(gi=>ssub.appendChild(groupLi(GROUPS[gi],gi)));
     stw.onclick=()=>{ const open=ssub.style.display!=="none"; ssub.style.display=open?"none":""; stw.textContent=open?"\u25b8":"\u25be"; };
     srow.appendChild(stw); srow.appendChild(scb); srow.appendChild(slb);
