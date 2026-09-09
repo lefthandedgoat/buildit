@@ -119,11 +119,19 @@ if (
 
 const text = readFileSync(input, "utf8");
 const prog = parse(text);
-const before = estimate(prog, { accel, rapidRate: rapid, junctionDeviation: jd });
+const before = estimate(prog, {
+  accel,
+  rapidRate: rapid,
+  junctionDeviation: jd,
+});
 
 const { text: janitorText, stats } = janitor(prog, { tolerance, decimals });
 const janitorProg = parse(janitorText);
-const mid = estimate(janitorProg, { accel, rapidRate: rapid, junctionDeviation: jd });
+const mid = estimate(janitorProg, {
+  accel,
+  rapidRate: rapid,
+  junctionDeviation: jd,
+});
 
 // v4 rest cleanup cuts (opt-in): insert finish-tool cleanup immediately
 // after each parent pocket loop, pre-arcs while G1 loops still exist.
@@ -207,7 +215,11 @@ const rest =
 
 const outText = stageText;
 const afterProg = parse(outText);
-const after = estimate(afterProg, { accel, rapidRate: rapid, junctionDeviation: jd });
+const after = estimate(afterProg, {
+  accel,
+  rapidRate: rapid,
+  junctionDeviation: jd,
+});
 
 if (output) writeFileSync(output, outText);
 
