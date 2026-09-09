@@ -12,6 +12,9 @@
 // topmost-first on shift+click, and shows a details panel (dims, position,
 // process, note + a dimensioned mini-SVG (longest-face elevation, wide flats drawn rotated) while highlighting every
 // identical part (same partId + same dx/dy/dz). A left parts tree groups identical boxes with show/hide checkboxes and click-to-select; the right panel is drag-resizable.
+// Machine add/remove: boxes with process "cnc" are vendor tool bodies (saw body, planer/jointer base+upper). Each station section nests them under a
+// "machine" row with its own show/hide checkbox and click-to-select, and a bar-level machines checkbox toggles all tool bodies at once —
+// the table/stand/drum structure stays put either way.
 
 import type { Box } from "./assembly.ts";
 
@@ -188,6 +191,7 @@ export function stlViewerHtml(
     .replace(/>/g, "&gt;");
   const boxJson = JSON.stringify(boxes ?? []).replace(/</g, "\\x3c");
   const picking = boxes !== undefined;
+  const hasMachines = (boxes ?? []).some((b) => b.process === "cnc");
   const pal = PALETTES[theme] ?? PALETTES.dark;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><link rel="icon" href="data:,"><title>${escTitle}</title>
@@ -223,7 +227,7 @@ export function stlViewerHtml(
   #grip:hover,#grip.on{background:#0a5dc2}
 </style></head>
 <body>
-<div id="bar"><b>${escTitle}</b><span class="hint">drag to rotate · wheel to zoom${picking ? " · shift+click a part for details" : ""}</span><button id="spin" aria-pressed="true">spin</button><span id="count"></span><span id="sel"></span></div>
+<div id="bar"><b>${escTitle}</b><span class="hint">drag to rotate · wheel to zoom${picking ? " · shift+click a part for details" : ""}</span><button id="spin" aria-pressed="true">spin</button>${hasMachines ? '<label><input type="checkbox" id="mach" checked> machines</label>' : ""}<span id="count"></span><span id="sel"></span></div>
 <div id="wrap">${picking ? '<aside id="tree"></aside>' : ""}<canvas id="c"></canvas>${picking ? '<div id="grip" title="drag to resize panel"></div>' : ""}<aside id="panel"></aside></div>
 <script>
 "use strict";
@@ -248,6 +252,7 @@ const PICK_OK = BOXES.length>0 && facets.length===BOXES.length*12;
 const keyOf=i=>BOXES[i].partId+"|"+BOXES[i].dx+"x"+BOXES[i].dy+"x"+BOXES[i].dz;
 let selected=-1; // box index, -1 = none
 let selectedStation=-1; // station index, -1 = none (exclusive with selected)
+let selectedMachine=-1; // station index whose MACHINE is selected, -1 = none (exclusive with both above)
 const cv=document.getElementById("c"), ctx=cv.getContext("2d");
 const panel=document.getElementById("panel"), selEl=document.getElementById("sel");
 function identicalTo(idx){
@@ -278,6 +283,11 @@ GROUPS.forEach((g,gi)=>{ const s=g.station;
   smap[s].members.push(gi); });
 const STATIONED=STATIONS.length>1||(STATIONS.length===1&&STATIONS[0].name!=="");
 function stationBoxes(si){ const out=[]; STATIONS[si].members.forEach(gi=>{ GROUPS[gi].idx.forEach(i=>out.push(i)); }); return out; }
+// Machine = vendor tool bodies (process cnc: saw body, planer/jointer
+// base+upper). Addable/removable independent of the table they ride on.
+const isMachine=i=>PICK_OK&&BOXES[i].process==="cnc";
+function machineBoxes(si){ const out=[]; STATIONS[si].members.forEach(gi=>{ GROUPS[gi].idx.forEach(i=>{ if(isMachine(i)) out.push(i); }); }); return out; }
+function allMachines(){ const out=[]; if(PICK_OK) for(let i=0;i<BOXES.length;i++) if(isMachine(i)) out.push(i); return out; }
 // Dims multiset per station: identical stations (same cuts, e.g. stop-w
 // vs stop-e) highlight as kin when one is selected.
 const STATIONKEYS={};
@@ -312,8 +322,21 @@ function syncTree(){
     sr.classList.toggle("off",vis===0);
     const sc=sr.querySelector("input");
     if(sc){ sc.checked=vis>0; sc.indeterminate=vis>0&&vis<box.length; } }
+  const mrows=tree.querySelectorAll("[data-machine]");
+  for(const mr of mrows){ const si=+mr.getAttribute("data-machine"); const box=machineBoxes(si);
+    const vis=box.filter(i=>!hidden.has(i)).length;
+    mr.classList.toggle("sel",box.includes(selected)||selectedMachine===si);
+    mr.classList.toggle("off",vis===0);
+    const mc=mr.querySelector("input");
+    if(mc){ mc.checked=vis>0; mc.indeterminate=vis>0&&vis<box.length; } }
+  const machBtn=document.getElementById("mach");
+  if(machBtn){ const m=allMachines(); const vis=m.filter(i=>!hidden.has(i)).length;
+    machBtn.checked=vis>0; machBtn.indeterminate=vis>0&&vis<m.length; }
 }
-function clearIfHidden(){ if(hidden.has(selected)){ selected=-1; updatePanel(); } else syncTree(); }
+function clearIfHidden(){ let changed=false;
+  if(selected>=0&&hidden.has(selected)){ selected=-1; changed=true; }
+  if(selectedMachine>=0&&machineBoxes(selectedMachine).every(i=>hidden.has(i))){ selectedMachine=-1; changed=true; }
+  if(changed) updatePanel(); else syncTree(); }
 function buildTree(){
   if(!tree||!PICK_OK) return;
   tree.replaceChildren();
@@ -369,7 +392,29 @@ function buildTree(){
     const count=stationBoxes(si).length;
     slb.textContent=(st.name||"parts")+" \u2014 "+count+" part"+(count===1?"":"s");
     const ssub=document.createElement("ul"); ssub.style.display="none";
-    st.members.forEach(gi=>ssub.appendChild(groupLi(GROUPS[gi],gi)));
+    // Machine groups (cnc tool bodies) nest under their own add/remove row
+    // so the saw/planer/jointer machine toggles independent of its table.
+    const machGis=st.members.filter(gi=>GROUPS[gi].idx.some(isMachine));
+    st.members.forEach(gi=>{ if(!machGis.includes(gi)) ssub.appendChild(groupLi(GROUPS[gi],gi)); });
+    if(machGis.length){
+      const mli=document.createElement("li");
+      const mrow=document.createElement("div"); mrow.className="trow"; mrow.setAttribute("data-machine",String(si));
+      const mtw=document.createElement("span"); mtw.className="twisty"; mtw.textContent="\u25b8";
+      mtw.title="expand/collapse machine";
+      const mcb=document.createElement("input"); mcb.type="checkbox"; mcb.checked=true;
+      mcb.title="add/remove "+(st.name||"model")+" machine";
+      mcb.onchange=()=>{ const box=machineBoxes(si); if(mcb.checked) box.forEach(i=>hidden.delete(i)); else box.forEach(i=>hidden.add(i)); clearIfHidden(); };
+      const mlb=document.createElement("span"); mlb.className="lbl";
+      const mcount=machineBoxes(si).length;
+      mlb.textContent="machine \u2014 "+mcount+" part"+(mcount===1?"":"s");
+      const msub=document.createElement("ul"); msub.style.display="none";
+      machGis.forEach(gi=>msub.appendChild(groupLi(GROUPS[gi],gi)));
+      mtw.onclick=()=>{ const open=msub.style.display!=="none"; msub.style.display=open?"none":""; mtw.textContent=open?"\u25b8":"\u25be"; };
+      mrow.appendChild(mtw); mrow.appendChild(mcb); mrow.appendChild(mlb);
+      mli.appendChild(mrow); mli.appendChild(msub);
+      // Machine rides at the top of its station section, above the table.
+      if(ssub.firstChild) ssub.insertBefore(mli, ssub.firstChild); else ssub.appendChild(mli);
+    }
     stw.onclick=()=>{ const open=ssub.style.display!=="none"; ssub.style.display=open?"none":""; stw.textContent=open?"\u25b8":"\u25be"; };
     srow.appendChild(stw); srow.appendChild(scb); srow.appendChild(slb);
     sli.appendChild(srow); sli.appendChild(ssub); ul.appendChild(sli);
@@ -378,22 +423,33 @@ function buildTree(){
     const t=e.target;
     if(t.tagName==="INPUT"||t.className==="twisty") return;
     const rb=t.closest("[data-box]");
-    if(rb){ selected=+rb.getAttribute("data-box"); selectedStation=-1; updatePanel(); return; }
+    if(rb){ selected=+rb.getAttribute("data-box"); selectedStation=-1; selectedMachine=-1; updatePanel(); return; }
     const rg=t.closest("[data-group]");
     if(rg){ const gg=GROUPS[+rg.getAttribute("data-group")];
-      const first=gg.idx.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); selectedStation=-1; updatePanel(); return; }
+      const first=gg.idx.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); selectedStation=-1; selectedMachine=-1; updatePanel(); return; }
     const rs=t.closest("[data-station]");
     if(rs){ const si=+rs.getAttribute("data-station");
       // Station select: whole module highlights, members unhidden and
       // revealed; identical stations light up as kin. Click again to clear.
-      selected=-1; selectedStation=(selectedStation===si?-1:si);
+      selected=-1; selectedMachine=-1; selectedStation=(selectedStation===si?-1:si);
       if(selectedStation>=0){ const box=stationBoxes(si);
         box.forEach(i=>hidden.delete(i));
         const sli=rs.parentElement, ssub=sli&&sli.querySelector("ul");
         if(ssub){ ssub.style.display=""; const stw=rs.querySelector(".twisty"); if(stw) stw.textContent="\u25be"; }
       }
       updatePanel(); return; }
-    if(t.closest("[data-clear]")){ selected=-1; selectedStation=-1; updatePanel(); }
+    const rm=t.closest("[data-machine]");
+    if(rm){ const si=+rm.getAttribute("data-machine");
+      // Machine select: just the tool bodies highlight, the table stays
+      // unselected. Click again to clear. Selecting unhides + reveals.
+      selected=-1; selectedStation=-1; selectedMachine=(selectedMachine===si?-1:si);
+      if(selectedMachine>=0){ const box=machineBoxes(si);
+        box.forEach(i=>hidden.delete(i));
+        const mli=rm.parentElement, msub=mli&&mli.querySelector("ul");
+        if(msub){ msub.style.display=""; const mtw=rm.querySelector(".twisty"); if(mtw) mtw.textContent="\u25be"; }
+      }
+      updatePanel(); return; }
+    if(t.closest("[data-clear]")){ selected=-1; selectedStation=-1; selectedMachine=-1; updatePanel(); }
   });
   syncTree();
 }
@@ -471,7 +527,25 @@ function metaLine(labelText,valueText){
   return d;
 }
 function updatePanel(){
-  if(!PICK_OK||(selected<0&&selectedStation<0)){ panel.classList.remove("show"); selEl.textContent=""; if(grip) grip.style.display="none"; syncTree(); return; }
+  if(!PICK_OK||(selected<0&&selectedStation<0&&selectedMachine<0)){ panel.classList.remove("show"); selEl.textContent=""; if(grip) grip.style.display="none"; syncTree(); return; }
+  if(selectedMachine>=0){
+    const st=STATIONS[selectedMachine], box=machineBoxes(selectedMachine);
+    selEl.textContent=" \u00b7 "+(st.name||"model")+" machine ("+box.length+" parts)";
+    panel.replaceChildren();
+    const h=document.createElement("h2"); h.textContent=(st.name||"model")+" machine"; panel.appendChild(h);
+    panel.appendChild(metaLine("parts ",String(box.length)));
+    panel.appendChild(metaLine("process ","cnc — vendor tool body"));
+    panel.appendChild(metaLine("table stays ","unselected — toggle the station row for the full module"));
+    panel.classList.add("show");
+    if(grip) grip.style.display="block";
+    const row=document.createElement("div"); row.className="row";
+    const btn=document.createElement("button"); btn.id="clear";
+    btn.textContent="clear (click machine again)";
+    btn.onclick=()=>{ selected=-1; selectedStation=-1; selectedMachine=-1; updatePanel(); };
+    row.appendChild(btn); panel.appendChild(row);
+    syncTree();
+    return;
+  }
   if(selectedStation>=0){
     const st=STATIONS[selectedStation], box=stationBoxes(selectedStation);
     const kin=stationKin(selectedStation);
@@ -486,7 +560,7 @@ function updatePanel(){
     const row=document.createElement("div"); row.className="row";
     const btn=document.createElement("button"); btn.id="clear";
     btn.textContent="clear (click station again)";
-    btn.onclick=()=>{ selected=-1; selectedStation=-1; updatePanel(); };
+    btn.onclick=()=>{ selected=-1; selectedStation=-1; selectedMachine=-1; updatePanel(); };
     row.appendChild(btn); panel.appendChild(row);
     syncTree();
     return;
@@ -520,8 +594,8 @@ function updatePanel(){
   panel.appendChild(detailSvgEl(b,availW,maxH));
   const row=document.createElement("div"); row.className="row";
   const btn=document.createElement("button"); btn.id="clear";
-  btn.textContent="clear (shift+click empty space)";
-  btn.onclick=()=>{ selected=-1; selectedStation=-1; updatePanel(); };
+    btn.textContent="clear (shift+click empty space)";
+  btn.onclick=()=>{ selected=-1; selectedStation=-1; selectedMachine=-1; updatePanel(); };
   row.appendChild(btn); panel.appendChild(row);
   syncTree();
 }
@@ -540,6 +614,11 @@ addEventListener("resize",resize); resize();
 addEventListener("resize",()=>{ if(PICK_OK&&selected>=0) updatePanel(); });
 const spinBtn=document.getElementById("spin");
 spinBtn.onclick=()=>{ spinning=!spinning; spinBtn.setAttribute("aria-pressed",String(spinning)); };
+const machBtn=document.getElementById("mach");
+if(machBtn) machBtn.onchange=()=>{ const box=allMachines();
+  if(machBtn.checked) box.forEach(i=>hidden.delete(i)); else box.forEach(i=>hidden.add(i));
+  if(!machBtn.checked&&selectedMachine>=0) selectedMachine=-1;
+  clearIfHidden(); };
 let drag=null, downPos=null;
 cv.addEventListener("pointerdown",e=>{ drag={x:e.clientX,y:e.clientY}; downPos={x:e.clientX,y:e.clientY}; try{ cv.setPointerCapture(e.pointerId); }catch(_){} cv.style.cursor="grabbing"; });
 cv.addEventListener("pointermove",e=>{ if(!drag)return;
@@ -587,6 +666,7 @@ function frame(t){
   const selKey=(PICK_OK&&selected>=0)?keyOf(selected):null;
   const sibSet=new Set(selKey?identicalTo(selected):[]);
   const selSt=(PICK_OK&&selectedStation>=0)?STATIONS[selectedStation].name:null;
+  const selMach=(PICK_OK&&selectedMachine>=0)?STATIONS[selectedMachine].name:null;
   const kinSt=new Set();
   if(selectedStation>=0) stationKin(selectedStation).forEach(i=>kinSt.add(STATIONS[i].name));
   const tris=[];
@@ -616,15 +696,16 @@ function frame(t){
     const isSib=PICK_OK&&selKey&&sibSet.has(t2.box);
     const stOfBox=(PICK_OK&&t2.box>=0)?(BOXES[t2.box].station||""):null;
     const isStSel=selSt!==null&&stOfBox===selSt;
+    const isMachSel=selMach!==null&&stOfBox===selMach&&PICK_OK&&BOXES[t2.box].process==="cnc";
     const isStKin=selSt!==null&&kinSt.has(stOfBox);
     const g=Math.round(40+t2.s*170);
-    // Selection reads teal, kin orange — parts and stations alike.
-    if(isSel||isStSel) ctx.fillStyle="rgb(45,212,191)";
+    // Selection reads teal, kin orange — parts, stations, and machines alike.
+    if(isSel||isStSel||isMachSel) ctx.fillStyle="rgb(45,212,191)";
     else if(isSib||isStKin) ctx.fillStyle="rgb(245,158,11)";
     else ctx.fillStyle="rgb("+g+","+Math.round(g*0.93)+","+Math.round(g*0.78)+")";
     ctx.fill();
-    ctx.strokeStyle=(isSel||isSib||isStSel||isStKin)?THEME_HI:THEME_EDGE;
-    ctx.lineWidth=(isSel||isSib||isStSel||isStKin)?2:1; ctx.stroke();
+    ctx.strokeStyle=(isSel||isSib||isStSel||isStKin||isMachSel)?THEME_HI:THEME_EDGE;
+    ctx.lineWidth=(isSel||isSib||isStSel||isStKin||isMachSel)?2:1; ctx.stroke();
   }
   requestAnimationFrame(frame);
 }

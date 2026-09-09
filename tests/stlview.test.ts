@@ -212,6 +212,33 @@ describe("station sections", () => {
     assert.equal(key("stop-w"), key("stop-e"));
   });
 
+  it("machines toggle: cnc tool bodies add/remove independent of tables", () => {
+    const boxes96 = gridBoxes(planAsymmetric96());
+    const grid = stlViewerHtml(boxesToStl(boxes96, "grid"), "grid", boxes96);
+    // Machine = cnc process (saw body, planer/jointer base+upper).
+    assert.ok(grid.includes('BOXES[i].process==="cnc"'));
+    assert.ok(grid.includes("machineBoxes"));
+    assert.ok(grid.includes("selectedMachine"));
+    assert.ok(grid.includes("[data-machine]"));
+    // Bar-level toggle + per-station machine row (generator emits — literally).
+    assert.ok(grid.includes('id="mach"'));
+    assert.ok(grid.includes("machine — "));
+    // Fixture truth: 5 tool bodies, all cnc, saw + two per drum.
+    const mach = boxes96.filter((b) => b.process === "cnc");
+    assert.equal(mach.length, 5);
+    assert.deepEqual(mach.map((b) => b.station).sort(), [
+      "fjoin",
+      "fjoin",
+      "fplan",
+      "fplan",
+      "saw",
+    ]);
+    // Bench has no cnc boxes: no machines checkbox, flat list unchanged.
+    const bst = boxesToStl(bench, "bench");
+    const plain = stlViewerHtml(bst, "bench", bench);
+    assert.ok(!plain.includes('id="mach"'));
+  });
+
   it("light theme paints a white stage; dark stays default", () => {
     const bst = boxesToStl(bench, "bench");
     const light = stlViewerHtml(bst, "bench", bench, "light");
