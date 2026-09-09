@@ -183,11 +183,7 @@ describe("station sections", () => {
 
   it("like-part matching is dims-based (corner posts light up together)", () => {
     const boxes96 = gridBoxes(planAsymmetric96());
-    const grid = stlViewerHtml(
-      boxesToStl(boxes96, "grid"),
-      "grid",
-      boxes96,
-    );
+    const grid = stlViewerHtml(boxesToStl(boxes96, "grid"), "grid", boxes96);
     // Same cut, four corners: dims key must not include the partId.
     assert.ok(
       grid.includes('const b=BOXES[idx], k=r3(b.dx)+"x"+r3(b.dy)+"x"+r3(b.dz)'),
@@ -195,9 +191,7 @@ describe("station sections", () => {
     const posts = boxes96.filter((b) => b.partId.startsWith("stop-w-post-"));
     assert.equal(posts.length, 4);
     // Same cut four times: dims identical, corners distinct.
-    const dims = new Set(
-      posts.map((b) => `${b.dx}x${b.dy}x${b.dz}`),
-    );
+    const dims = new Set(posts.map((b) => `${b.dx}x${b.dy}x${b.dz}`));
     assert.equal(dims.size, 1);
   });
 });
