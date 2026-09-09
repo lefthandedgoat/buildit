@@ -566,8 +566,12 @@ function frame(t){
     const isStSel=selSt!==null&&stOfBox===selSt;
     const isStKin=selSt!==null&&kinSt.has(stOfBox);
     const g=Math.round(40+t2.s*170);
-    if(isSel||isStSel) ctx.fillStyle="rgb(245,158,11)";
-    else if(isSib||isStKin) ctx.fillStyle="rgb(45,212,191)";
+    if(isSel) ctx.fillStyle="rgb(245,158,11)";
+    else if(isSib) ctx.fillStyle="rgb(45,212,191)";
+    // Stations read the other way round: the selected module goes teal,
+    // identical modules orange (parts keep orange-selected above).
+    else if(isStSel) ctx.fillStyle="rgb(45,212,191)";
+    else if(isStKin) ctx.fillStyle="rgb(245,158,11)";
     else ctx.fillStyle="rgb("+g+","+Math.round(g*0.93)+","+Math.round(g*0.78)+")";
     ctx.fill();
     ctx.strokeStyle=(isSel||isSib||isStSel||isStKin)?"rgba(255,255,255,.9)":"rgba(0,0,0,.25)";
