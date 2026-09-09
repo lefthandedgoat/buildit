@@ -197,11 +197,7 @@ describe("station sections", () => {
 
   it("station click selects the whole station with identical-station kin", () => {
     const boxes96 = gridBoxes(planAsymmetric96());
-    const grid = stlViewerHtml(
-      boxesToStl(boxes96, "grid"),
-      "grid",
-      boxes96,
-    );
+    const grid = stlViewerHtml(boxesToStl(boxes96, "grid"), "grid", boxes96);
     assert.ok(grid.includes("selectedStation"));
     assert.ok(grid.includes("stationKin"));
     assert.ok(grid.includes("STATIONKEYS"));
