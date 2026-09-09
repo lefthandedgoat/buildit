@@ -195,6 +195,7 @@ document.getElementById("count").textContent=facets.length+" triangles";
 const PICK_OK = BOXES.length>0 && facets.length===BOXES.length*12;
 const keyOf=i=>BOXES[i].partId+"|"+BOXES[i].dx+"x"+BOXES[i].dy+"x"+BOXES[i].dz;
 let selected=-1; // box index, -1 = none
+let selectedStation=-1; // station index, -1 = none (exclusive with selected)
 const cv=document.getElementById("c"), ctx=cv.getContext("2d");
 const panel=document.getElementById("panel"), selEl=document.getElementById("sel");
 function identicalTo(idx){
@@ -225,6 +226,16 @@ GROUPS.forEach((g,gi)=>{ const s=g.station;
   smap[s].members.push(gi); });
 const STATIONED=STATIONS.length>1||(STATIONS.length===1&&STATIONS[0].name!=="");
 function stationBoxes(si){ const out=[]; STATIONS[si].members.forEach(gi=>{ GROUPS[gi].idx.forEach(i=>out.push(i)); }); return out; }
+// Dims multiset per station: identical stations (same cuts, e.g. stop-w
+// vs stop-e) highlight as kin when one is selected.
+const STATIONKEYS={};
+STATIONS.forEach(st=>{ const ks=[];
+  st.members.forEach(gi=>{ GROUPS[gi].idx.forEach(i=>{ const o=BOXES[i];
+    ks.push(Math.round(o.dx*1000)/1000+"x"+Math.round(o.dy*1000)/1000+"x"+Math.round(o.dz*1000)/1000); }); });
+  ks.sort(); STATIONKEYS[st.name]=ks.join(";"); });
+function stationKin(si){ const out=[]; const ref=STATIONKEYS[STATIONS[si].name];
+  STATIONS.forEach((st,i)=>{ if(i!==si&&STATIONKEYS[st.name]===ref) out.push(i); });
+  return out; }
 const hidden=new Set();
 function syncTree(){
   if(!tree||!PICK_OK) return;
@@ -243,9 +254,9 @@ function syncTree(){
   const allC=document.getElementById("tall");
   if(allC){ allC.checked=hidden.size===0; allC.indeterminate=hidden.size>0&&hidden.size<BOXES.length; }
   const srows=tree.querySelectorAll("[data-station]");
-  for(const sr of srows){ const box=stationBoxes(+sr.getAttribute("data-station"));
+  for(const sr of srows){ const si=+sr.getAttribute("data-station"); const box=stationBoxes(si);
     const vis=box.filter(i=>!hidden.has(i)).length;
-    sr.classList.toggle("sel",box.includes(selected));
+    sr.classList.toggle("sel",box.includes(selected)||selectedStation===si);
     sr.classList.toggle("off",vis===0);
     const sc=sr.querySelector("input");
     if(sc){ sc.checked=vis>0; sc.indeterminate=vis>0&&vis<box.length; } }
@@ -315,14 +326,22 @@ function buildTree(){
     const t=e.target;
     if(t.tagName==="INPUT"||t.className==="twisty") return;
     const rb=t.closest("[data-box]");
-    if(rb){ selected=+rb.getAttribute("data-box"); updatePanel(); return; }
+    if(rb){ selected=+rb.getAttribute("data-box"); selectedStation=-1; updatePanel(); return; }
     const rg=t.closest("[data-group]");
     if(rg){ const gg=GROUPS[+rg.getAttribute("data-group")];
-      const first=gg.idx.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); updatePanel(); return; }
+      const first=gg.idx.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); selectedStation=-1; updatePanel(); return; }
     const rs=t.closest("[data-station]");
-    if(rs){ const box=stationBoxes(+rs.getAttribute("data-station"));
-      const first=box.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); updatePanel(); return; }
-    if(t.closest("[data-clear]")){ selected=-1; updatePanel(); }
+    if(rs){ const si=+rs.getAttribute("data-station");
+      // Station select: whole module highlights, members unhidden and
+      // revealed; identical stations light up as kin. Click again to clear.
+      selected=-1; selectedStation=(selectedStation===si?-1:si);
+      if(selectedStation>=0){ const box=stationBoxes(si);
+        box.forEach(i=>hidden.delete(i));
+        const sli=rs.parentElement, ssub=sli&&sli.querySelector("ul");
+        if(ssub){ ssub.style.display=""; const stw=rs.querySelector(".twisty"); if(stw) stw.textContent="\u25be"; }
+      }
+      updatePanel(); return; }
+    if(t.closest("[data-clear]")){ selected=-1; selectedStation=-1; updatePanel(); }
   });
   syncTree();
 }
@@ -400,7 +419,26 @@ function metaLine(labelText,valueText){
   return d;
 }
 function updatePanel(){
-  if(!PICK_OK||selected<0){ panel.classList.remove("show"); selEl.textContent=""; if(grip) grip.style.display="none"; syncTree(); return; }
+  if(!PICK_OK||(selected<0&&selectedStation<0)){ panel.classList.remove("show"); selEl.textContent=""; if(grip) grip.style.display="none"; syncTree(); return; }
+  if(selectedStation>=0){
+    const st=STATIONS[selectedStation], box=stationBoxes(selectedStation);
+    const kin=stationKin(selectedStation);
+    selEl.textContent=" \u00b7 "+(st.name||"model")+" ("+box.length+" parts)";
+    panel.replaceChildren();
+    const h=document.createElement("h2"); h.textContent=(st.name||"model")+" station"; panel.appendChild(h);
+    panel.appendChild(metaLine("parts ",String(box.length)));
+    panel.appendChild(metaLine("groups ",String(st.members.length)));
+    panel.appendChild(metaLine("identical stations ",kin.length?kin.map(i=>STATIONS[i].name).join(", "):"none — unique"));
+    panel.classList.add("show");
+    if(grip) grip.style.display="block";
+    const row=document.createElement("div"); row.className="row";
+    const btn=document.createElement("button"); btn.id="clear";
+    btn.textContent="clear (click station again)";
+    btn.onclick=()=>{ selected=-1; selectedStation=-1; updatePanel(); };
+    row.appendChild(btn); panel.appendChild(row);
+    syncTree();
+    return;
+  }
   const b=BOXES[selected], sibs=identicalTo(selected);
   selEl.textContent=" \u00b7 "+b.label+" ("+sibs.length+"\u00d7 "+b.partId+")";
   panel.replaceChildren();
@@ -431,7 +469,7 @@ function updatePanel(){
   const row=document.createElement("div"); row.className="row";
   const btn=document.createElement("button"); btn.id="clear";
   btn.textContent="clear (shift+click empty space)";
-  btn.onclick=()=>{ selected=-1; updatePanel(); };
+  btn.onclick=()=>{ selected=-1; selectedStation=-1; updatePanel(); };
   row.appendChild(btn); panel.appendChild(row);
   syncTree();
 }
@@ -496,6 +534,9 @@ function frame(t){
   ctx.fillStyle="#111"; ctx.fillRect(0,0,W,H);
   const selKey=(PICK_OK&&selected>=0)?keyOf(selected):null;
   const sibSet=new Set(selKey?identicalTo(selected):[]);
+  const selSt=(PICK_OK&&selectedStation>=0)?STATIONS[selectedStation].name:null;
+  const kinSt=new Set();
+  if(selectedStation>=0) stationKin(selectedStation).forEach(i=>kinSt.add(STATIONS[i].name));
   const tris=[];
   for(let fi=0;fi<facets.length;fi++){
     const f=facets[fi];
@@ -521,13 +562,16 @@ function frame(t){
     screenTris.push({p:pts,box:t2.box});
     const isSel=PICK_OK&&t2.box===selected;
     const isSib=PICK_OK&&selKey&&sibSet.has(t2.box);
+    const stOfBox=(PICK_OK&&t2.box>=0)?(BOXES[t2.box].station||""):null;
+    const isStSel=selSt!==null&&stOfBox===selSt;
+    const isStKin=selSt!==null&&kinSt.has(stOfBox);
     const g=Math.round(40+t2.s*170);
-    if(isSel) ctx.fillStyle="rgb(245,158,11)";
-    else if(isSib) ctx.fillStyle="rgb(45,212,191)";
+    if(isSel||isStSel) ctx.fillStyle="rgb(245,158,11)";
+    else if(isSib||isStKin) ctx.fillStyle="rgb(45,212,191)";
     else ctx.fillStyle="rgb("+g+","+Math.round(g*0.93)+","+Math.round(g*0.78)+")";
     ctx.fill();
-    ctx.strokeStyle=isSel||isSib?"rgba(255,255,255,.9)":"rgba(0,0,0,.25)";
-    ctx.lineWidth=isSel||isSib?2:1; ctx.stroke();
+    ctx.strokeStyle=(isSel||isSib||isStSel||isStKin)?"rgba(255,255,255,.9)":"rgba(0,0,0,.25)";
+    ctx.lineWidth=(isSel||isSib||isStSel||isStKin)?2:1; ctx.stroke();
   }
   requestAnimationFrame(frame);
 }

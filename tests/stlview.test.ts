@@ -194,4 +194,25 @@ describe("station sections", () => {
     const dims = new Set(posts.map((b) => `${b.dx}x${b.dy}x${b.dz}`));
     assert.equal(dims.size, 1);
   });
+
+  it("station click selects the whole station with identical-station kin", () => {
+    const boxes96 = gridBoxes(planAsymmetric96());
+    const grid = stlViewerHtml(
+      boxesToStl(boxes96, "grid"),
+      "grid",
+      boxes96,
+    );
+    assert.ok(grid.includes("selectedStation"));
+    assert.ok(grid.includes("stationKin"));
+    assert.ok(grid.includes("STATIONKEYS"));
+    assert.ok(grid.includes("identical stations "));
+    // stop-w vs stop-e share the same cut multiset (mirrored bays).
+    const key = (st) =>
+      boxes96
+        .filter((b) => b.station === st)
+        .map((b) => `${b.dx}x${b.dy}x${b.dz}`)
+        .sort()
+        .join(";");
+    assert.equal(key("stop-w"), key("stop-e"));
+  });
 });
