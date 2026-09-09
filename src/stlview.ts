@@ -199,8 +199,15 @@ const cv=document.getElementById("c"), ctx=cv.getContext("2d");
 const panel=document.getElementById("panel"), selEl=document.getElementById("sel");
 function identicalTo(idx){
   if(idx<0||idx>=BOXES.length)return [];
-  const k=keyOf(idx), out=[];
-  for(let i=0;i<BOXES.length;i++) if(keyOf(i)===k) out.push(i);
+  // Kin by DIMENSIONS, not partId: corner-suffixed parts (stop-w-post-fl
+  // vs -fr) are the same cut in different positions and must light up
+  // together. Rounded to 0.001mm: mirrored/offset arithmetic leaves
+  // float dust on otherwise identical cuts. (The TS identicalBoxes stays
+  // partId-strict for cut lists.)
+  const r3=v=>Math.round(v*1000)/1000;
+  const b=BOXES[idx], k=r3(b.dx)+"x"+r3(b.dy)+"x"+r3(b.dz), out=[];
+  for(let i=0;i<BOXES.length;i++){ const o=BOXES[i];
+    if(r3(o.dx)+"x"+r3(o.dy)+"x"+r3(o.dz)===k) out.push(i); }
   return out;
 }
 const tree=document.getElementById("tree"), grip=document.getElementById("grip");
