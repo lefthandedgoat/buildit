@@ -144,7 +144,12 @@ describe("station sections", () => {
   it("stationsOf lists distinct stations first-seen, '' when unset", () => {
     assert.deepEqual(stationsOf([]), []);
     assert.deepEqual(
-      stationsOf([{ station: "saw" }, {}, { station: "saw" }, { station: "fp" }]),
+      stationsOf([
+        { station: "saw" },
+        {},
+        { station: "saw" },
+        { station: "fp" },
+      ]),
       ["saw", "", "fp"],
     );
   });
@@ -169,11 +174,7 @@ describe("station sections", () => {
     const plan = defaultPlan();
     const gboxes = gridBoxes(plan);
     assert.ok(stationsOf(gboxes).length > 1);
-    const grid = stlViewerHtml(
-      boxesToStl(gboxes, "grid"),
-      "grid",
-      gboxes,
-    );
+    const grid = stlViewerHtml(boxesToStl(gboxes, "grid"), "grid", gboxes);
     assert.ok(grid.includes("[data-station]"));
     assert.ok(grid.includes("STATIONED"));
     // Bench boxes carry no station: single "" section renders flat.
