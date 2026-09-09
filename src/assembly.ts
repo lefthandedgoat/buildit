@@ -15,6 +15,10 @@ export interface Box {
   partId: string;
   label: string;
   qtyNote?: string;
+  /** Engine bay/station that produced this box (grid plans stamp the bay
+   * id; bench boxes leave it unset). The viewer tree groups by station
+   * first, identical parts second. */
+  station?: string;
   /** Lower-corner position, mm. */
   x: number;
   y: number;

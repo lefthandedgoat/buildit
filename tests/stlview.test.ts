@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { benchAssembly } from "../src/assembly.ts";
+import { defaultPlan, gridBoxes } from "../src/modules.ts";
 import { boxesToStl } from "../src/stl.ts";
 import {
   boxKey,
@@ -8,6 +9,7 @@ import {
   fitScale,
   groupBoxes,
   identicalBoxes,
+  stationsOf,
   stlViewerHtml,
 } from "../src/stlview.ts";
 
@@ -134,5 +136,47 @@ describe("stl viewer page", () => {
     assert.ok(rich.includes('sub.style.display="none";'));
     assert.ok(rich.includes("detailSvgEl(b,availW,maxH)"));
     assert.ok(rich.includes("for(const k of panel.children)"));
+  });
+});
+
+describe("station sections", () => {
+  const bench = benchAssembly({ topLen: 1219, topDepth: 457, height: 457 });
+  it("stationsOf lists distinct stations first-seen, '' when unset", () => {
+    assert.deepEqual(stationsOf([]), []);
+    assert.deepEqual(
+      stationsOf([{ station: "saw" }, {}, { station: "saw" }, { station: "fp" }]),
+      ["saw", "", "fp"],
+    );
+  });
+
+  it("grid boxes all carry their bay station (unstowed + stowed)", () => {
+    const plan = defaultPlan();
+    const ids = new Set(plan.bays.map((b) => b.id));
+    for (const stowed of [false, true]) {
+      const boxes = gridBoxes(plan, stowed);
+      assert.ok(boxes.length > 0);
+      for (const b of boxes) {
+        assert.ok(
+          b.station !== undefined && ids.has(b.station),
+          `${b.partId} station=${b.station}`,
+        );
+      }
+      assert.ok(stationsOf(boxes).length > 1);
+    }
+  });
+
+  it("stationed models embed section machinery; bench stays one flat list", () => {
+    const plan = defaultPlan();
+    const gboxes = gridBoxes(plan);
+    assert.ok(stationsOf(gboxes).length > 1);
+    const grid = stlViewerHtml(
+      boxesToStl(gboxes, "grid"),
+      "grid",
+      gboxes,
+    );
+    assert.ok(grid.includes("[data-station]"));
+    assert.ok(grid.includes("STATIONED"));
+    // Bench boxes carry no station: single "" section renders flat.
+    assert.deepEqual(stationsOf(bench), [""]);
   });
 });

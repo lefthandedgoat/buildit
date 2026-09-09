@@ -565,6 +565,13 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
     const { id: station, kind } = bay;
     const ox = bay.x;
     const oy = totalD - bay.y - bay.d;
+    // Every box pushed for this bay belongs to it: stamp the station for
+    // the viewer tree (helpers don't know the bay; stowed copies inherit
+    // via the same mark).
+    const mark = out.length;
+    const stamp = () => {
+      for (let i = mark; i < out.length; i++) out[i].station ??= station;
+    };
     if (kind === "flip") {
       const tool = plan.flipTools[station];
       if (tool === undefined)
@@ -581,6 +588,7 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
           ...stowBoxes(wedges, drum.axleY, drum.A),
         );
       else out.push(...drum.rotating, ...wedges);
+      stamp();
       continue;
     }
     if (kind === "top") {
@@ -620,6 +628,7 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
         ),
       );
     }
+    stamp();
   }
   return out;
 }

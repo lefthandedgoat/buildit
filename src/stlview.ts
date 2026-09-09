@@ -114,6 +114,21 @@ export function groupBoxes(
   return groups;
 }
 
+/** Distinct stations in first-seen order ("" = unstationed boxes, e.g.
+ * bench). The viewer tree renders one collapsible section per station. */
+export function stationsOf(boxes: Pick<Box, "station">[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const b of boxes) {
+    const s = b.station ?? "";
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out;
+}
+
 export function stlViewerHtml(
   stlText: string,
   title: string,
@@ -192,8 +207,17 @@ const tree=document.getElementById("tree"), grip=document.getElementById("grip")
 // Groups in first-seen order (mirrors groupBoxes on the TS side).
 const GROUPS=[]; const gmap={};
 if(PICK_OK) for(let i=0;i<BOXES.length;i++){ const k=keyOf(i);
-  if(!gmap[k]){ gmap[k]={key:k,partId:BOXES[i].partId,dims:BOXES[i].dx+" x "+BOXES[i].dy+" x "+BOXES[i].dz,idx:[]}; GROUPS.push(gmap[k]); }
+  if(!gmap[k]){ gmap[k]={key:k,partId:BOXES[i].partId,dims:BOXES[i].dx+" x "+BOXES[i].dy+" x "+BOXES[i].dz,station:BOXES[i].station||"",idx:[]}; GROUPS.push(gmap[k]); }
   gmap[k].idx.push(i); }
+// Station sections in first-seen order (mirrors stationsOf on the TS side).
+// Unstationed models (bench) collapse to one "" section: the tree below
+// renders exactly the flat list it always did.
+const STATIONS=[]; const smap={};
+GROUPS.forEach((g,gi)=>{ const s=g.station;
+  if(!smap[s]){ smap[s]={name:s,members:[]}; STATIONS.push(smap[s]); }
+  smap[s].members.push(gi); });
+const STATIONED=STATIONS.length>1||(STATIONS.length===1&&STATIONS[0].name!=="");
+function stationBoxes(si){ const out=[]; STATIONS[si].members.forEach(gi=>{ GROUPS[gi].idx.forEach(i=>out.push(i)); }); return out; }
 const hidden=new Set();
 function syncTree(){
   if(!tree||!PICK_OK) return;
@@ -211,6 +235,13 @@ function syncTree(){
     if(gc){ gc.checked=vis>0; gc.indeterminate=vis>0&&vis<g.idx.length; } }
   const allC=document.getElementById("tall");
   if(allC){ allC.checked=hidden.size===0; allC.indeterminate=hidden.size>0&&hidden.size<BOXES.length; }
+  const srows=tree.querySelectorAll("[data-station]");
+  for(const sr of srows){ const box=stationBoxes(+sr.getAttribute("data-station"));
+    const vis=box.filter(i=>!hidden.has(i)).length;
+    sr.classList.toggle("sel",box.includes(selected));
+    sr.classList.toggle("off",vis===0);
+    const sc=sr.querySelector("input");
+    if(sc){ sc.checked=vis>0; sc.indeterminate=vis>0&&vis<box.length; } }
 }
 function clearIfHidden(){ if(hidden.has(selected)){ selected=-1; updatePanel(); } else syncTree(); }
 function buildTree(){
@@ -228,7 +259,9 @@ function buildTree(){
   rl.setAttribute("data-clear","1");
   root.appendChild(rl); tree.appendChild(root);
   const ul=document.createElement("ul"); tree.appendChild(ul);
-  GROUPS.forEach((g,gi)=>{
+  // One group row (identical parts + expandable copies), shared by the
+  // flat list and the station sections below.
+  function groupLi(g,gi){
     const li=document.createElement("li");
     const row=document.createElement("div"); row.className="trow"; row.setAttribute("data-group",String(gi));
     const tw=document.createElement("span"); tw.className="twisty"; tw.textContent="\u25b8";
@@ -250,7 +283,26 @@ function buildTree(){
     });
     tw.onclick=()=>{ const open=sub.style.display!=="none"; sub.style.display=open?"none":""; tw.textContent=open?"\u25b8":"\u25be"; };
     row.appendChild(tw); row.appendChild(cb); row.appendChild(lb);
-    li.appendChild(row); li.appendChild(sub); ul.appendChild(li);
+    li.appendChild(row); li.appendChild(sub);
+    return li;
+  }
+  if(!STATIONED){ GROUPS.forEach((g,gi)=>ul.appendChild(groupLi(g,gi))); }
+  else STATIONS.forEach((st,si)=>{
+    const sli=document.createElement("li");
+    const srow=document.createElement("div"); srow.className="trow"; srow.setAttribute("data-station",String(si));
+    const stw=document.createElement("span"); stw.className="twisty"; stw.textContent="\u25be";
+    stw.title="expand/collapse station";
+    const scb=document.createElement("input"); scb.type="checkbox"; scb.checked=true;
+    scb.title="show/hide "+(st.name||"all")+" station";
+    scb.onchange=()=>{ const box=stationBoxes(si); if(scb.checked) box.forEach(i=>hidden.delete(i)); else box.forEach(i=>hidden.add(i)); clearIfHidden(); };
+    const slb=document.createElement("span"); slb.className="lbl";
+    const count=stationBoxes(si).length;
+    slb.textContent=(st.name||"parts")+" \u2014 "+count+" part"+(count===1?"":"s");
+    const ssub=document.createElement("ul");
+    st.members.forEach(gi=>ssub.appendChild(groupLi(GROUPS[gi],gi)));
+    stw.onclick=()=>{ const open=ssub.style.display!=="none"; ssub.style.display=open?"none":""; stw.textContent=open?"\u25b8":"\u25be"; };
+    srow.appendChild(stw); srow.appendChild(scb); srow.appendChild(slb);
+    sli.appendChild(srow); sli.appendChild(ssub); ul.appendChild(sli);
   });
   tree.addEventListener("click",e=>{
     const t=e.target;
@@ -260,6 +312,9 @@ function buildTree(){
     const rg=t.closest("[data-group]");
     if(rg){ const gg=GROUPS[+rg.getAttribute("data-group")];
       const first=gg.idx.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); updatePanel(); return; }
+    const rs=t.closest("[data-station]");
+    if(rs){ const box=stationBoxes(+rs.getAttribute("data-station"));
+      const first=box.find(i=>!hidden.has(i)); selected=(first===undefined?-1:first); updatePanel(); return; }
     if(t.closest("[data-clear]")){ selected=-1; updatePanel(); }
   });
   syncTree();
