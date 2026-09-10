@@ -1432,9 +1432,7 @@ export function flipRectBay(
         ox + (west ? 0 : place.cheekOutR + inboardGap),
         oy + (D - tool.tableD) / 2,
         frameTopZ,
-        west
-          ? place.cheekOutL - inboardGap
-          : W - place.cheekOutR - inboardGap,
+        west ? place.cheekOutL - inboardGap : W - place.cheekOutR - inboardGap,
         tool.tableD,
         g.panelT,
         "laminate",
