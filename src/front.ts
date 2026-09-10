@@ -125,7 +125,8 @@ function mainGrid(): void {
     const v = mmArg(flag, 0);
     if (v === 0) return; // flag absent: keep the plan's own value
     for (const [id, tool] of Object.entries(plan.flipTools))
-      if (tool.name.includes(match)) plan.flipTools[id] = { ...tool, baseToTable: v };
+      if (tool.name.includes(match))
+        plan.flipTools[id] = { ...tool, baseToTable: v };
   };
   setBed("--planerBed", "planer");
   setBed("--jointerBed", "jointer");
