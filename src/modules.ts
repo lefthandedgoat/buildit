@@ -1187,6 +1187,8 @@ export function flipRectBay(
     );
   const toolX0 = (W - tool.tableW) / 2;
   const toolY0 = (D - tool.tableD) / 2;
+  const bedT = 25; // working-table slab thickness
+  const headW = Math.round(tool.tableW * 0.4); // head along the feed axis
   const rotating: Box[] = [
     B(
       "drum-platform",
@@ -1237,28 +1239,49 @@ export function flipRectBay(
       "honey locust glue-up cheek; grain along the 700mm depth",
     ),
     B(
+      // The working table: a thin slab whose top is the H datum, so the
+      // infeed/outfeed surfaces read around the head (a planer bed, a
+      // jointer's two tables).
       "tool-base",
-      `${tool.name} base`,
+      `${tool.name} table`,
       toolX0,
       toolY0,
-      platTop,
+      platTop + tool.baseToTable - bedT,
       tool.tableW,
       tool.tableD,
-      tool.baseToTable,
+      bedT,
       "cnc",
-      `${tool.name}; working table lands at H`,
+      `${tool.name} working table; top lands on H`,
     ),
     B(
+      // The cast body under the table, inset, so the silhouette is a
+      // machine on a base rather than a solid block.
+      "tool-body",
+      `${tool.name} body`,
+      toolX0 + 40,
+      toolY0 + 40,
+      platTop,
+      tool.tableW - 80,
+      tool.tableD - 80,
+      tool.baseToTable - bedT,
+      "cnc",
+      "vendor base casting (below the working table)",
+    ),
+    B(
+      // Head across the full machine width over the middle of the bed, like a
+      // planer's cutterhead/motor block (a jointer's casting over its two
+      // tables): the working table reads as real infeed/outfeed surfaces
+      // either side of it, which is what sets the feed axis.
       "tool-upper",
       `${tool.name} upper`,
-      toolX0 + 100,
-      toolY0 + 50,
+      toolX0 + (tool.tableW - headW) / 2,
+      toolY0,
       platTop + tool.baseToTable,
-      tool.tableW - 200,
-      tool.tableD - 100,
+      headW,
+      tool.tableD,
       tool.aboveTable,
       "cnc",
-      "housing above the table (fence off to flip)",
+      "head + motor standing on the table (fence off to flip)",
     ),
   ];
   // Bearing rails carry the pillows but duck under the side top rails

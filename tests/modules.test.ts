@@ -260,7 +260,44 @@ describe("feed arrows (3D viewer hint)", () => {
       );
     }
     // The planer's arrow starts west of the jointer's tool and points at it.
-    assert.ok(planer.to[0] < jointer.from[0], "hand-off runs toward the jointer");
+    assert.ok(
+      planer.to[0] < jointer.from[0],
+      "hand-off runs toward the jointer",
+    );
+  });
+});
+
+describe("tool massing reads as a machine", () => {
+  it("working table on H, inset body below, head standing centred on it", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    const at = (id: string, part: string) => {
+      const b = bs.find((x) => x.partId === `${id}-${part}`);
+      assert.ok(b, `${id} ${part} present`);
+      return b;
+    };
+    for (const bay of p.bays.filter((b) => b.kind === "flip")) {
+      const tool = p.flipTools[bay.id];
+      const table = at(bay.id, "tool-base");
+      const body = at(bay.id, "tool-body");
+      const head = at(bay.id, "tool-upper");
+      // The H datum lives on the table slab's top face.
+      assert.equal(table.z + table.dz, p.spec.H);
+      assert.equal(table.dx, tool.tableW);
+      assert.equal(table.dy, tool.tableD);
+      assert.ok(table.dz <= 25, "table is a slab, not a block");
+      // Cast body sits on the platform and meets the table underside.
+      assert.equal(body.z, p.spec.H - tool.baseToTable);
+      assert.equal(body.z + body.dz, table.z);
+      assert.ok(body.dx < table.dx && body.dy < table.dy, "body inset");
+      // Head stands on the table, centred on the feed axis.
+      assert.equal(head.z, p.spec.H);
+      assert.equal(head.x, table.x + (table.dx - head.dx) / 2);
+      assert.equal(head.y, table.y + (table.dy - head.dy) / 2);
+      assert.equal(head.dz, tool.aboveTable);
+      // Everything stays inside the tool's own envelope.
+      assert.ok(head.dx <= table.dx && head.dy <= table.dy);
+    }
   });
 });
 

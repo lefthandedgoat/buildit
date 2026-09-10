@@ -240,12 +240,15 @@ describe("station sections", () => {
     // Bar-level toggle + per-station machine row (generator emits — literally).
     assert.ok(grid.includes('id="mach"'));
     assert.ok(grid.includes("machine — "));
-    // Fixture truth: 5 tool bodies, all cnc, saw + two per drum.
+    // Fixture truth: 7 tool bodies, all cnc, saw + three per drum (the
+    // working table, the cast body under it, and the head/motor).
     const mach = boxes96.filter((b) => b.process === "cnc");
-    assert.equal(mach.length, 5);
+    assert.equal(mach.length, 7);
     assert.deepEqual(mach.map((b) => b.station).sort(), [
       "fjoin",
       "fjoin",
+      "fjoin",
+      "fplan",
       "fplan",
       "fplan",
       "saw",

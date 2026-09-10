@@ -51,10 +51,10 @@ describe("flip-drum balance", () => {
       Math.abs(fplan.drumMomentKgM - -1.728) < 0.002,
       `moment ${fplan.drumMomentKgM}`,
     );
-    assert.ok(Math.abs(fplan.swingRadiusMm - 468.68) < 0.02);
+    assert.ok(Math.abs(fplan.swingRadiusMm - 485.037) < 0.02);
     const planer = flipAssist(fplan, 30, 200);
     assert.ok(Math.abs(planer.peakMomentKgM - 5.772) < 0.002);
-    assert.ok(Math.abs(planer.rimForceN - 120.78) < 0.05);
+    assert.ok(Math.abs(planer.rimForceN - 116.704) < 0.05);
     assert.ok(Math.abs(planer.neutralCounterweightKg - 29.3) < 0.01);
 
     const fjoin = flipLoad(plan, "fjoin");

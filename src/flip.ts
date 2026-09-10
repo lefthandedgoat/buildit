@@ -67,10 +67,9 @@ export function flipLoad(plan: GridPlan, bayId: string): FlipLoad {
   let drumMomentKgM = 0;
   let flatOuterMm = Number.NaN;
   for (const b of drum.rotating) {
-    // The tool rides with the drum but its mass belongs to the vendor box,
-    // not to the wood: the caller supplies it as a point mass.
-    if (b.partId.endsWith("-tool-base") || b.partId.endsWith("-tool-upper"))
-      continue;
+    // The tool rides with the drum but its mass belongs to the vendor
+    // machine, not to the wood: the caller supplies it as a point mass.
+    if (b.partId.includes("-tool-")) continue;
     if (b.partId.endsWith("-drum-flat")) flatOuterMm = b.z;
     const m = partMassKg(b);
     drumMassKg += m;
