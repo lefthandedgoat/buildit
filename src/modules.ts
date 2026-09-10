@@ -29,6 +29,8 @@ export interface GridSpec {
   cartClear: number; // cart-to-opening total clearance
   cartWall: number;
   platformT: number; // cart platform thickness
+  /** Platform shoulder each side of a flip tool (tight drums; default 25). */
+  drumPad?: number;
   rows: number;
   cols: number;
 }
@@ -49,6 +51,7 @@ export const DEFAULT_GRID: GridSpec = {
   cartClear: 12,
   cartWall: 19,
   platformT: 19,
+  drumPad: 25,
   rows: 2,
   cols: 3,
 };
@@ -1177,6 +1180,73 @@ export interface FlipRect {
   swingRadius: number;
 }
 
+export interface DrumPlacement {
+  /** Outer face of each cheek: the rotating X band is cheekOutL..cheekOutR. */
+  cheekOutL: number;
+  cheekOutR: number;
+  /** Platform X range, between the cheeks. */
+  inL: number;
+  inR: number;
+  /** Tool origin on the platform (the plan's verified feed position). */
+  toolX0: number;
+  platformW: number;
+  drumDepth: number;
+  /** "tool": drum sized by the machine; "bay": bay too narrow, old snug rule. */
+  sized: "tool" | "bay";
+  /** The clamp moved the drum (the wanted position no longer fits the bay). */
+  clamped: boolean;
+}
+
+/**
+ * The rotating part is sized by the MACHINE, not by the bay. The platform is
+ * the tool plus `pad` (spec.drumPad, default 25) on each side, in both axes,
+ * and the drum is placed where the tool's plan-verified feed position asks
+ * for it — clamped so both cheeks stay clear of the pillow blocks, which
+ * stay on the frame at the bay edges. Offsets are from the bay's low-x edge.
+ */
+export function drumPlacement(
+  g: GridSpec,
+  W: number,
+  tool: FlipTool,
+): DrumPlacement {
+  const pad = g.drumPad ?? 25;
+  const cheekT = 19;
+  // The tool's position was tuned on the old full-width platform; keep that
+  // absolute position (the feed hand-off geometry was verified with it) and
+  // shrink the drum around it. A tight platform has no travel, so shiftFrac
+  // is now a placement, not slack to slide through.
+  const legacySlack = (W - 2 * (38 + 45 + 19) - tool.tableW) / 2;
+  const shiftX =
+    tool.feedAxis === "x"
+      ? (tool.shiftFrac ?? 0) * legacySlack * (tool.feedDir > 0 ? 1 : -1)
+      : 0;
+  const snug = W - 2 * (38 + 45 + 19); // the old bay-filling platform
+  const tight = tool.tableW + 2 * pad;
+  const stack = pad + cheekT; // platform shoulder + cheek
+  const lo = 38 + 45; // west pillow's inboard face
+  // A bay too narrow for the tight drum keeps the old behaviour: fill the
+  // interior between the pillows (that is what the narrow plans were
+  // verified with), with whatever shoulder is left.
+  const sized = tight <= snug ? "tool" : "bay";
+  const platformW = Math.max(Math.min(snug, tight), tool.tableW);
+  const want = (W - tool.tableW) / 2 + shiftX - stack;
+  const hi = W - 83 - tool.tableW - 2 * stack;
+  const cheekOutL =
+    sized === "tool" ? Math.max(Math.min(Math.max(want, lo), hi), lo) : lo;
+  return {
+    cheekOutL,
+    cheekOutR: cheekOutL + platformW + 2 * cheekT,
+    inL: cheekOutL + cheekT,
+    inR: cheekOutL + cheekT + platformW,
+    toolX0:
+      sized === "tool" ? cheekOutL + stack : (W - tool.tableW) / 2 + shiftX,
+    platformW,
+    drumDepth: tool.tableD + 2 * pad,
+    sized,
+    clamped: sized === "tool" && Math.abs(cheekOutL - want) > 1e-9,
+  };
+}
+
 /**
  * Flip drum in a W(x) by D(y) bay. Same asymmetric recipe as the square
  * drum (platform +50 above axle, flat face lands H-3): 34in jointer tables
@@ -1198,74 +1268,105 @@ export function flipRectBay(
   const dFlat = H - g.supportDrop - A;
   const platTop = A + dPlat;
   const flatOuter = A - dFlat;
-  const cheekOutL = 38 + 45;
-  const cheekOutR = W - 38 - 45;
-  const inL = cheekOutL + cheekT;
-  const inR = cheekOutR - cheekT;
-  const drumDepth = 700;
-  const dy0 = (D - drumDepth) / 2;
   const axleY = D / 2;
+  // Machine-sized drum (see drumPlacement): a narrower rotating part leaves
+  // the bay's infeed side free for fixed structure, which the old
+  // full-width drum swept away.
+  const place = drumPlacement(g, W, tool);
+  const { inL, inR, drumDepth } = place;
+  const dy0 = (D - drumDepth) / 2;
   const frame = frameRectBoxes(g, station, ox, oy, W, D, {
     backRail: false,
     ledges: "sides",
   });
-  // Second post pair in the 45mm strip between the corner post and the
-  // drum's X band (cheekOutL): the only inboard room the sweep leaves. The
-  // pair is X-disjoint from every rotating part, so it clears the flip at
-  // any height; it carries a matching top rail and floor stretcher.
-  const inX = cheekOutL - g.frontPostFace;
+  // The drum leaves a wide free strip on the tool's infeed side. A second
+  // post pair (front + back) goes there as far inboard as the sweep allows,
+  // with a top rail and a floor stretcher, and the pair carries a fixed
+  // in-bay infeed table that closes the span the outside table cannot reach.
+  // Everything is X-disjoint from the drum's band, so it clears the flip at
+  // any height (see sweepCollisions' SAT test).
   const frameTopZ = H - g.supportDrop - g.panelT;
+  const west = tool.feedDir > 0; // the infeed end of the bay
+  const inboardGap = 10; // fixed structure never closer than this to the band
+  const pairX = west
+    ? place.cheekOutL - inboardGap - g.railT
+    : place.cheekOutR + inboardGap;
+  // Only build the bent where it fits: the pair has to clear the side ledge
+  // (a bay this narrow would otherwise stack legs on the corner post), and
+  // the table has to be worth having.
+  const strip = west
+    ? place.cheekOutL - g.frontPostFace
+    : W - g.frontPostFace - place.cheekOutR;
+  const bent =
+    strip >= inboardGap + g.railT + 60 &&
+    (west
+      ? pairX >= g.ledgeW + g.railT
+      : pairX + g.railT <= W - g.ledgeW - g.railT);
   // The back post lands on the existing floor stretcher (z = stretcherH)
   // rather than through it.
-  for (const [suffix, py, pz] of [
-    ["in-f", 0, 0],
-    ["in-b", D - g.post, g.stretcherH],
-  ] as const)
+  if (bent)
+    for (const [suffix, py, pz] of [
+      ["in-f", 0, 0],
+      ["in-b", D - g.post, g.stretcherH],
+    ] as const)
+      frame.push(
+        box(
+          `${station}-post-${suffix}`,
+          `${station} inboard post`,
+          ox + pairX,
+          oy + py,
+          pz,
+          g.frontPostFace,
+          g.post,
+          frameTopZ - pz,
+          "saw",
+          pz > 0
+            ? "store 2x4; second post pair, lands on the back stretcher"
+            : "store 2x4; second post pair, clears the drum band",
+        ),
+      );
+  if (bent)
     frame.push(
       box(
-        `${station}-post-${suffix}`,
-        `${station} inboard post`,
-        ox + inX,
-        oy + py,
-        pz,
-        g.frontPostFace,
-        g.post,
-        frameTopZ - pz,
+        `${station}-rail-in`,
+        `${station} inboard top rail`,
+        ox + pairX,
+        oy + g.post,
+        frameTopZ - g.railH,
+        g.railT,
+        D - 2 * g.post,
+        g.railH,
         "saw",
-        pz > 0
-          ? "store 2x4; second post pair, lands on the back stretcher"
-          : "store 2x4; second post pair, butts the drum band",
+        "store 2x4; ties the second post pair and carries the infeed table",
+      ),
+      box(
+        `${station}-inbay-table`,
+        `${station} in-bay infeed table ${both(west ? pairX + g.railT : W - pairX)}x${both(tool.tableD)}`,
+        ox + (west ? 0 : pairX),
+        oy + (D - tool.tableD) / 2,
+        frameTopZ,
+        west ? pairX + g.railT : W - pairX,
+        tool.tableD,
+        g.panelT,
+        "laminate",
+        "fixed in-bay infeed support at H-3; bolts to the frame, carried by the second post pair",
       ),
     );
-  frame.push(
-    // Top tie is a 19mm strip inset to x 64..83: the ledge owns x 38..57 at
-    // this height, and a full 38mm rail would foul the jointer's wedges
-    // (their axle sits higher).
-    box(
-      `${station}-rail-in`,
-      `${station} inboard top tie`,
-      ox + inX + g.ledgeW,
-      oy + g.post,
-      frameTopZ - g.railH,
-      g.ledgeW,
-      D - 2 * g.post,
-      g.railH,
-      "saw",
-      "19mm strip; ties the second post pair at the top",
-    ),
-    box(
-      `${station}-stretch-in`,
-      `${station} inboard stretcher`,
-      ox + inX,
-      oy + g.post,
-      0,
-      g.stretcherT,
-      D - 2 * g.post,
-      g.stretcherH,
-      "saw",
-      "store 2x4 at floor; ties the second post pair",
-    ),
-  );
+  if (bent)
+    frame.push(
+      box(
+        `${station}-stretch-in`,
+        `${station} inboard stretcher`,
+        ox + pairX,
+        oy + g.post,
+        0,
+        g.stretcherT,
+        D - 2 * g.post,
+        g.stretcherH,
+        "saw",
+        "store 2x4 at floor; ties the second post pair",
+      ),
+    );
   const B = (
     partId: string,
     label: string,
@@ -1290,12 +1391,8 @@ export function flipRectBay(
       process,
       note,
     );
-  const slack = (inR - inL - tool.tableW) / 2; // free travel on the platform
-  const shiftX =
-    tool.feedAxis === "x"
-      ? (tool.shiftFrac ?? 0) * slack * (tool.feedDir > 0 ? 1 : -1)
-      : 0;
-  const toolX0 = (W - tool.tableW) / 2 + shiftX;
+  // The tool keeps the position the plan's feed geometry was verified with.
+  const toolX0 = place.toolX0;
   const toolY0 = (D - tool.tableD) / 2;
   const bedT = 25; // working-table slab thickness
   const headW = Math.round(tool.tableW * 0.4); // head along the feed axis
@@ -1327,26 +1424,26 @@ export function flipRectBay(
     B(
       "drum-cheek-l",
       `drum cheek`,
-      cheekOutL,
+      place.cheekOutL,
       dy0,
       flatOuter,
       cheekT,
       drumDepth,
       platTop - flatOuter,
       "saw",
-      "honey locust glue-up cheek; grain along the 700mm depth",
+      "honey locust glue-up cheek; grain along the depth",
     ),
     B(
       "drum-cheek-r",
       `drum cheek`,
-      cheekOutR - cheekT,
+      place.cheekOutR - cheekT,
       dy0,
       flatOuter,
       cheekT,
       drumDepth,
       platTop - flatOuter,
       "saw",
-      "honey locust glue-up cheek; grain along the 700mm depth",
+      "honey locust glue-up cheek; grain along the depth",
     ),
     B(
       // The working table: a thin slab whose top is the H datum, so the

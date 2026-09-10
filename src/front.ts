@@ -72,6 +72,7 @@ export function planBench(): BenchPlan {
  *   --sawBaseW/--sawBaseD MM   saw base footprint (measure the base, not the table)
  *   --sawBaseToTable MM        saw base bottom -> table top, off-stand
  *   --planerBed/--jointerBed MM  flip tool: base bottom -> working table
+ *   --drumPad MM               flip drum: platform shoulder each side of the tool
  * Add --verify to re-prove the datums after changing any of them. */
 function mainGrid(): void {
   const IN = 25.4;
@@ -123,6 +124,7 @@ function mainGrid(): void {
   plan.sawBaseW = mmArg("--sawBaseW", plan.sawBaseW);
   plan.sawBaseD = mmArg("--sawBaseD", plan.sawBaseD);
   plan.sawBaseToTable = mmArg("--sawBaseToTable", plan.sawBaseToTable);
+  g.drumPad = g.drumPad === undefined ? undefined : mmArg("--drumPad", g.drumPad);
   /** Positive kg value for --planerMass / --jointerMass. */
   const kgArg = (flag: string): number | null => {
     const raw = optArg(flag);

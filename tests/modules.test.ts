@@ -4,6 +4,7 @@ import {
   JOINTER_FLIP,
   PLANER_FLIP,
   defaultPlan,
+  drumPlacement,
   feedArrows,
   flipRectBay,
   frameRectBoxes,
@@ -306,19 +307,26 @@ describe("tool massing reads as a machine", () => {
 });
 
 describe("outfeed shift + outboard infeed support", () => {
-  it("slides each lateral tool toward its outfeed, staying on the platform", () => {
+  it("centres the tool on its tight platform, with the drum toward its outfeed", () => {
     const p = planAsymmetric96();
     const bs = gridBoxes(p);
     for (const id of ["fplan", "fjoin"]) {
+      const bay = p.bays.find((b) => b.id === id)!;
+      const tool = p.flipTools[id]!;
+      const pl = drumPlacement(p.spec, bay.w, tool);
       const plat = bs.find((b) => b.partId === `${id}-drum-platform`)!;
       const table = bs.find((b) => b.partId === `${id}-tool-base`)!;
-      const tool = p.flipTools[id];
-      assert.ok(table.x >= plat.x && table.x + table.dx <= plat.x + plat.dx);
+      // On a tight platform there is no travel left to slide through: the
+      // tool is centred and the DRUM is what sits off-centre.
       const west = table.x - plat.x;
       const east = plat.x + plat.dx - (table.x + table.dx);
-      if (tool.feedDir > 0) assert.ok(east < west, `${id} should sit east`);
-      else assert.ok(west < east, `${id} should sit west`);
-      assert.ok(Math.min(west, east) > 5, `${id} keeps clearance`);
+      assert.ok(Math.abs(west - east) < 1e-9, `${id} tool centred`);
+      assert.ok(Math.abs(west - (p.spec.drumPad ?? 25)) < 1e-9);
+      const gapWest = pl.cheekOutL - 38;
+      const gapEast = bay.w - 38 - pl.cheekOutR;
+      if (tool.feedDir > 0)
+        assert.ok(gapEast < gapWest, `${id} drum sits east`);
+      else assert.ok(gapWest < gapEast, `${id} drum sits west`);
     }
   });
 
@@ -345,33 +353,103 @@ describe("outfeed shift + outboard infeed support", () => {
   });
 });
 
-describe("inboard post pair (flip bay stiffening)", () => {
-  it("sits in the 45mm strip, clear of the drum's X band, and is tied top+bottom", () => {
+describe("flip drums are sized by the machine, not by the bay", () => {
+  const bayOf = (p: GridPlan, id: string) => p.bays.find((b) => b.id === id)!;
+  const padOf = (p: GridPlan) => p.spec.drumPad ?? 25;
+
+  it("platform = tool + 2*pad, band clear of both pillow blocks", () => {
     const p = planAsymmetric96();
     const bs = gridBoxes(p);
     for (const id of ["fplan", "fjoin"]) {
+      const bay = bayOf(p, id);
+      const tool = p.flipTools[id]!;
+      const pl = drumPlacement(p.spec, bay.w, tool);
+      assert.equal(pl.platformW, tool.tableW + 2 * padOf(p));
+      assert.equal(pl.drumDepth, tool.tableD + 2 * padOf(p));
+      // Never into the pillow blocks (they stay on the frame at bay edges).
+      assert.ok(pl.cheekOutL >= 83 - 1e-9, `${id} west cheek clears pillow`);
+      assert.ok(
+        pl.cheekOutR <= bay.w - 83 + 1e-9,
+        `${id} east cheek clears pillow`,
+      );
+      // Far narrower than the old bay-filling platform (bay - 204).
+      assert.ok(pl.platformW < bay.w - 205, `${id} drum is narrower`);
+      // The tool keeps the feed position the plan was verified with.
+      const base = bs.find((b) => b.partId === `${id}-tool-base`)!;
+      assert.ok(
+        Math.abs(base.x - bay.x - pl.toolX0) < 1e-9,
+        `${id} tool stays put`,
+      );
+      // Every rotating slab really is on the platform.
+      for (const r of bs.filter(
+        (b) =>
+          b.partId.startsWith(`${id}-drum-`) &&
+          !b.partId.includes("cheek") &&
+          !b.partId.includes("-stowed"),
+      )) {
+        const rx = r.x - bay.x;
+        assert.ok(
+          rx >= pl.inL - 1e-9 && rx + r.dx <= pl.inR + 1e-9,
+          `${r.partId} on the platform`,
+        );
+        assert.ok(r.y >= (bay.d - pl.drumDepth) / 2 - 1e-9);
+        assert.ok(r.y + r.dy <= (bay.d + pl.drumDepth) / 2 + 1e-9);
+      }
+    }
+  });
+
+  it("narrows further with --drumPad and still verifies", () => {
+    const wide = planAsymmetric96();
+    const tight = planAsymmetric96({ ...wide.spec, drumPad: 15 });
+    const a = gridBoxes(wide).find((b) => b.partId === "fplan-drum-platform")!;
+    const b = gridBoxes(tight).find(
+      (b2) => b2.partId === "fplan-drum-platform",
+    )!;
+    assert.ok(Math.abs(b.dx - (a.dx - 20)) < 1e-9, `${b.dx}`);
+    assert.deepEqual(gridPlanIssues(tight), []);
+  });
+
+  it("the in-bay infeed table reaches the bay edge and stops short of the band", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    for (const id of ["fplan", "fjoin"]) {
+      const bay = bayOf(p, id);
+      const tool = p.flipTools[id]!;
+      const pl = drumPlacement(p.spec, bay.w, tool);
+      const west = tool.feedDir > 0;
+      const tbl = bs.find((b) => b.partId === `${id}-inbay-table`)!;
+      const t0 = tbl.x - bay.x;
+      const t1 = t0 + tbl.dx;
+      // Outer edge meets the bay's infeed edge, flush with the outside table.
+      assert.equal(west ? t0 : t1, west ? 0 : bay.w);
+      // Inner edge stops 10mm short of the drum's X band.
+      const bandEdge = west ? pl.cheekOutL - 10 : pl.cheekOutR + 10;
+      assert.ok(Math.abs((west ? t1 : t0) - bandEdge) < 1e-9);
+      assert.equal(tbl.dy, tool.tableD);
+      assert.equal(tbl.z + tbl.dz, p.spec.H - p.spec.supportDrop);
+      // It closes most of the span the outside table could not reach.
+      const gap = west ? pl.toolX0 - t1 : t0 - (pl.toolX0 + tool.tableW);
+      assert.ok(
+        gap > 0 && gap < 100,
+        `${id} infeed gap now ${gap.toFixed(1)}mm`,
+      );
+      // The second post pair stands at the table's inner end, clear of the
+      // drum, tied by a full 2x4 top rail and a floor stretcher.
       const posts = bs.filter(
         (b) => b.partId === `${id}-post-in-f` || b.partId === `${id}-post-in-b`,
       );
       assert.equal(posts.length, 2);
-      const drumX0 = Math.min(
-        ...bs.filter((b) => b.partId.startsWith(`${id}-drum-`)).map((b) => b.x),
-      );
       for (const post of posts) {
-        assert.ok(
-          post.x + post.dx <= drumX0 + 1e-9,
-          `${post.partId} must clear the drum's X band`,
-        );
         assert.equal(post.dx, 38);
+        assert.ok(
+          post.x + post.dx <= pl.cheekOutL - 10 + 1e-9 ||
+            post.x >= pl.cheekOutR + 10 - 1e-9,
+          `${post.partId} clear of the band`,
+        );
       }
-      // The back post lands on the existing floor stretcher (z = 89).
-      const back = bs.find((b) => b.partId === `${id}-post-in-b`)!;
-      assert.equal(back.z, 89);
-      // Ties: 19mm strip at the top, stretcher at the floor.
-      const tie = bs.find((b) => b.partId === `${id}-rail-in`)!;
-      assert.equal(tie.dx, 19);
-      assert.equal(tie.z + tie.dz, p.spec.H - p.spec.supportDrop - p.spec.panelT);
-      assert.ok(bs.some((b) => b.partId === `${id}-stretch-in`));
+      assert.equal(bs.find((b) => b.partId === `${id}-post-in-b`)!.z, 89);
+      assert.equal(bs.find((b) => b.partId === `${id}-rail-in`)!.dx, 38);
+      assert.equal(bs.find((b) => b.partId === `${id}-stretch-in`)!.z, 0);
     }
   });
 });
@@ -380,7 +458,15 @@ describe("sweepCollisions has no face-on blind spot", () => {
   it("flags a post under the middle of the platform (no rotating corner lands in it)", () => {
     const p = planAsymmetric96();
     const bay = p.bays.find((b) => b.id === "fplan")!;
-    const drum = flipRectBay(p.spec, bay.id, 0, 0, bay.w, bay.d, p.flipTools[bay.id]);
+    const drum = flipRectBay(
+      p.spec,
+      bay.id,
+      0,
+      0,
+      bay.w,
+      bay.d,
+      p.flipTools[bay.id],
+    );
     const all = gridBoxes(p);
     const totalD = Math.max(...p.bays.map((b) => b.y + b.d));
     const oy = totalD - bay.y - bay.d;
@@ -396,24 +482,31 @@ describe("sweepCollisions has no face-on blind spot", () => {
       x: b2.x + bay.x,
       y: b2.y + oy,
     }));
-    const post = {
-      partId: "hypo-inboard-post",
+    // A block 200mm below the axle at the axle's own Y, inside the drum's X
+    // band: free space when the drum is up, but the cheeks sweep straight
+    // through it. Every rotating corner circle has a radius of 208mm+ (the
+    // slab corners sit at the platform's Y extremes), so no sampled corner
+    // can ever land in a 40mm-wide block at the axle's Y — this is exactly
+    // what the old corner-only sampler reported as "clear".
+    const mid = drumPlacement(p.spec, bay.w, p.flipTools[bay.id]!);
+    const block = {
+      partId: "hypo-in-band-block",
       label: "hypo",
-      x: 600,
-      y: oy,
-      z: 0,
+      x: bay.x + (mid.inL + mid.inR) / 2,
+      y: oy + bay.d / 2 - 20,
+      z: drum.A - 210,
       dx: 38,
-      dy: 89,
-      dz: 842,
+      dy: 40,
+      dz: 20,
       process: "saw" as const,
       note: "hypo",
     };
     assert.ok(
       sweepCollisions(placed, drum.axleY + oy, drum.A, bay.flipDir ?? 1, [
         ...obstacles,
-        post,
+        block,
       ]).length > 0,
-      "a face-on strike must be reported even when no corner lands in the post",
+      "a face-on strike must be reported even when no corner lands in it",
     );
   });
 });
