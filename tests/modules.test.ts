@@ -454,6 +454,97 @@ describe("flip drums are sized by the machine, not by the bay", () => {
   });
 });
 
+describe("the two flip bays are the same assembly", () => {
+  const bayOf = (p: GridPlan, id: string) => p.bays.find((b) => b.id === id)!;
+  const bent = /-post-in-|-rail-in|-stretch-in|-inbay-table/;
+  const hardware = /-drum-|-tool-|-infeed-|wedge|pillow|axle|bearrail/;
+
+  it("frames are part-for-part identical, same place in the bay", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    const [a, b] = ["fplan", "fjoin"].map((id) => bayOf(p, id));
+    assert.equal(a.w, b.w);
+    assert.equal(a.d, b.d);
+    const parts = (bay: typeof a) =>
+      bs
+        .filter(
+          (x) =>
+            x.partId.startsWith(`${bay.id}-`) &&
+            !hardware.test(x.partId) &&
+            !bent.test(x.partId),
+        )
+        .map(
+          (x) =>
+            `${x.partId.slice(bay.id.length)} ${x.dx}x${x.dy}x${x.dz} ` +
+            `@${x.x - bay.x},${x.y - bay.y},${x.z}`,
+        )
+        .sort();
+    // Posts, rails, ledges, stretchers: one cut list, two bays.
+    assert.deepEqual(parts(a), parts(b));
+  });
+
+  it("hardware is the same part too; only its height differs", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    const [a, b] = ["fplan", "fjoin"].map((id) => bayOf(p, id));
+    const hw = (bay: typeof a) =>
+      bs
+        .filter(
+          (x) =>
+            x.partId.startsWith(`${bay.id}-`) &&
+            /-axle|-pillow|-bearrail|-wedge/.test(x.partId),
+        )
+        .map((x) => [
+          x.partId.slice(bay.id.length).replace(/-(l|r)$/, ""),
+          x.dx,
+          x.dy,
+          x.dz,
+          x.z,
+        ])
+        .sort();
+    const [pa, pb] = [hw(a), hw(b)];
+    assert.equal(pa.length, pb.length);
+    for (let i = 0; i < pa.length; i++) {
+      // Same part, same size — axle, both pillows, both bearing rails, both
+      // wedges.
+      assert.deepEqual(pa[i].slice(0, 4), pb[i].slice(0, 4), `${pa[i][0]}`);
+      // Height follows the tools' bed heights (A = H - baseToTable - 50),
+      // except the bearing rails, which duck under the side top rails.
+      const adv =
+        p.flipTools[a.id]!.baseToTable - p.flipTools[b.id]!.baseToTable;
+      if (String(pa[i][0]).includes("bearrail"))
+        assert.ok(
+          Math.abs((pb[i][4] as number) - (pa[i][4] as number)) < 45 + 1e-9,
+        );
+      else
+        assert.ok(
+          Math.abs((pb[i][4] as number) - ((pa[i][4] as number) + adv)) < 1e-9,
+          `${pa[i][0]} height`,
+        );
+    }
+  });
+
+  it("each drum sits stopped against its outfeed-side pillow block", () => {
+    const p = planAsymmetric96();
+    for (const id of ["fplan", "fjoin"]) {
+      const bay = bayOf(p, id);
+      const tool = p.flipTools[id]!;
+      const pl = drumPlacement(p.spec, bay.w, tool);
+      assert.ok(pl.clamped, `${id} drum should be at its stop`);
+      if (tool.feedDir > 0)
+        assert.ok(
+          Math.abs(pl.cheekOutR - (bay.w - 83)) < 1e-9,
+          `${id} outfeed (east) cheek against the east pillow`,
+        );
+      else
+        assert.ok(
+          Math.abs(pl.cheekOutL - 83) < 1e-9,
+          `${id} outfeed (west) cheek against the west pillow`,
+        );
+    }
+  });
+});
+
 describe("sweepCollisions has no face-on blind spot", () => {
   it("flags a post under the middle of the platform (no rotating corner lands in it)", () => {
     const p = planAsymmetric96();

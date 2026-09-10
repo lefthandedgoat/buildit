@@ -124,7 +124,8 @@ function mainGrid(): void {
   plan.sawBaseW = mmArg("--sawBaseW", plan.sawBaseW);
   plan.sawBaseD = mmArg("--sawBaseD", plan.sawBaseD);
   plan.sawBaseToTable = mmArg("--sawBaseToTable", plan.sawBaseToTable);
-  g.drumPad = g.drumPad === undefined ? undefined : mmArg("--drumPad", g.drumPad);
+  g.drumPad =
+    g.drumPad === undefined ? undefined : mmArg("--drumPad", g.drumPad);
   /** Positive kg value for --planerMass / --jointerMass. */
   const kgArg = (flag: string): number | null => {
     const raw = optArg(flag);
@@ -207,6 +208,7 @@ function mainGrid(): void {
       "4. Stow flips + spin saw 90deg for crosscut mode (neighbors become support).",
       "5. Park the rip fence or stow the planer before ripping wide (fence overhangs east).",
       "6. Jointer flips fence-off; fence lives on wall hooks.",
+      "7. Flip drums: slide the drum toward its OUTFEED-side pillow block until the cheek stops against it, then clamp. Both bays build identically that way — the stop, not a measurement, sets the tool's feed position.",
       "",
       "| part | size | origin | process | note |",
       "| --- | --- | --- | --- | --- |",
