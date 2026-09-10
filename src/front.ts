@@ -122,6 +122,24 @@ function mainGrid(): void {
   plan.sawBaseW = mmArg("--sawBaseW", plan.sawBaseW);
   plan.sawBaseD = mmArg("--sawBaseD", plan.sawBaseD);
   plan.sawBaseToTable = mmArg("--sawBaseToTable", plan.sawBaseToTable);
+  /** Positive kg value for --planerMass / --jointerMass. */
+  const kgArg = (flag: string): number | null => {
+    const raw = optArg(flag);
+    if (raw === null) return null;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0)
+      bad(`${flag} must be a positive number of kg, got "${raw}"`);
+    return v;
+  };
+  /** Non-negative mm value for --*Cg: a CG may sit at the platform top. */
+  const cgArg = (flag: string): number | null => {
+    const raw = optArg(flag);
+    if (raw === null) return null;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v < 0)
+      bad(`${flag} must be a number >= 0 mm, got "${raw}"`);
+    return v;
+  };
   const setBed = (flag: string, match: string): void => {
     const v = mmArg(flag, 0);
     if (v === 0) return; // flag absent: keep the plan's own value
@@ -213,26 +231,36 @@ function mainGrid(): void {
   // the plan; the tool mass is the one measured input (--planerMass/
   // --jointerMass, CG defaults to mid-envelope, override --*Cg).
   for (const bay of plan.bays.filter((b) => b.kind === "flip")) {
-    const l = flipLoad(plan, bay.id);
     const tool = plan.flipTools[bay.id];
-    if (!tool) continue;
-    const which = l.toolName.includes("planer") ? "planer" : "jointer";
-    const flags = { mass: `--${which}Mass`, cg: `--${which}Cg` };
+    if (!tool) {
+      console.log(`flip: ${bay.id} — no tool configured, skipping`);
+      continue;
+    }
+    const l = flipLoad(plan, bay.id);
+    const which = l.toolName.includes("planer")
+      ? "planer"
+      : l.toolName.includes("jointer")
+        ? "jointer"
+        : null;
     console.log(
       `flip: ${bay.id} (${l.toolName}) — drum ${l.drumMassKg.toFixed(1)} kg, self-moment ${l.drumMomentKgM.toFixed(2)} kg.m (${l.drumMomentKgM < 0 ? "flat-heavy, rests tool-up" : "wants to fall"}); counterweight arm ${Math.round(l.counterweightArmMm)} mm, rim ${Math.round(l.swingRadiusMm)} mm`,
     );
-    const massRaw = optArg(flags.mass);
-    const mass =
-      massRaw === null ? null : mmArg(flags.mass, Number.NaN);
+    if (which === null) {
+      console.log(
+        `flip:   no mass flag for tool "${l.toolName}" — size it via flipAssist() directly`,
+      );
+      continue;
+    }
+    const flags = { mass: `--${which}Mass`, cg: `--${which}Cg` };
+    const mass = kgArg(flags.mass);
     if (mass === null) {
       console.log(
         `flip:   size the assist with ${flags.mass} KG (CG defaults to ${Math.round(defaultCgMm(tool.baseToTable, tool.aboveTable))} mm mid-envelope)`,
       );
       continue;
     }
-    const cgRaw = optArg(flags.cg);
     const cg =
-      cgRaw === null ? defaultCgMm(tool.baseToTable, tool.aboveTable) : mmArg(flags.cg, Number.NaN);
+      cgArg(flags.cg) ?? defaultCgMm(tool.baseToTable, tool.aboveTable);
     const a = flipAssist(l, mass, cg);
     console.log(
       `flip:   tool ${mass} kg @ CG ${Math.round(cg)} mm -> peak ${a.peakMomentKgM.toFixed(2)} kg.m (${Math.round(a.peakTorqueNm)} N.m), rim hold ${Math.round(a.rimForceN)} N (~${(a.rimForceN / 9.80665).toFixed(1)} kgf)` +
