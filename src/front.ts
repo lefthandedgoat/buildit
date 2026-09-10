@@ -34,6 +34,7 @@ import {
   planAsymmetric,
   planAsymmetric96,
   gridBoxes,
+  gridPlanIssues,
   gridPlanSvg,
 } from "./modules.ts";
 import { profileRect, drillHole, camProgram } from "./cam.ts";
@@ -62,14 +63,37 @@ export function planBench(): BenchPlan {
 }
 
 /** Grid mode speaks inches (--S 32 --H 34 --panelT 0.75). No casters: dolly + skids.
- * --layout frontfeed (96x48) | asymmetric (76x60) | asymmetric96 (96x64, default). */
+ * --layout frontfeed (96x48) | asymmetric (76x60) | asymmetric96 (96x64, default).
+ *
+ * Measured tool numbers are CLI overrides, so one reproduce command carries
+ * the real values into the plan, the CUTLIST header and the app's params:
+ *   --sawBaseW/--sawBaseD MM   saw base footprint (measure the base, not the table)
+ *   --sawBaseToTable MM        saw base bottom -> table top, off-stand
+ *   --planerBed/--jointerBed MM  flip tool: base bottom -> working table
+ * Add --verify to re-prove the datums after changing any of them. */
 function mainGrid(): void {
   const IN = 25.4;
+  const optArg = (flag: string): string | null => {
+    const i = process.argv.indexOf(flag);
+    return i < 0 || i + 1 >= process.argv.length ? null : process.argv[i + 1];
+  };
+  const bad = (msg: string): never => {
+    console.error(`error: ${msg}`);
+    process.exit(2);
+  };
+  /** Positive inch value for --S/--H/--panelT. */
+  const inch = (flag: string, def: string): number => {
+    const raw = optArg(flag) ?? def;
+    const v = Number(raw) * IN;
+    if (!Number.isFinite(v) || v <= 0)
+      bad(`${flag} must be a positive number, got "${raw}"`);
+    return v;
+  };
   const g = {
     ...DEFAULT_GRID,
-    S: Number(arg("--S", "32")) * IN,
-    H: Number(arg("--H", "34")) * IN,
-    panelT: Number(arg("--panelT", "0.75")) * IN,
+    S: inch("--S", "32"),
+    H: inch("--H", "34"),
+    panelT: inch("--panelT", "0.75"),
   };
   const layout = arg("--layout", "asymmetric96");
   if (
@@ -77,15 +101,37 @@ function mainGrid(): void {
     layout !== "asymmetric" &&
     layout !== "asymmetric96"
   )
-    throw new Error(
-      `--layout must be frontfeed|asymmetric|asymmetric96, got ${layout}`,
-    );
+    bad(`--layout must be frontfeed|asymmetric|asymmetric96, got ${layout}`);
   const plan =
     layout === "asymmetric"
       ? planAsymmetric(g)
       : layout === "asymmetric96"
         ? planAsymmetric96(g)
         : defaultPlan(g);
+  // Measured tool numbers: enter them once on the command line, get them
+  // into every derived artifact (CUTLIST header, geometry, app params).
+  const mmArg = (flag: string, cur: number): number => {
+    const raw = optArg(flag);
+    if (raw === null) return cur;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0)
+      bad(`${flag} must be a positive number of mm, got "${raw}"`);
+    return v;
+  };
+  plan.sawBaseW = mmArg("--sawBaseW", plan.sawBaseW);
+  plan.sawBaseD = mmArg("--sawBaseD", plan.sawBaseD);
+  plan.sawBaseToTable = mmArg("--sawBaseToTable", plan.sawBaseToTable);
+  const setBed = (flag: string, match: string): void => {
+    const v = mmArg(flag, 0);
+    if (v === 0) return; // flag absent: keep the plan's own value
+    for (const [id, tool] of Object.entries(plan.flipTools))
+      if (tool.name.includes(match)) plan.flipTools[id] = { ...tool, baseToTable: v };
+  };
+  setBed("--planerBed", "planer");
+  setBed("--jointerBed", "jointer");
+  const bedOf = (match: string): number =>
+    Object.values(plan.flipTools).find((t) => t.name.includes(match))
+      ?.baseToTable ?? 0;
   const boxes = gridBoxes(plan);
   const outDir = arg("--out", "examples/grid-2x3");
   mkdirSync(outDir, { recursive: true });
@@ -124,6 +170,8 @@ function mainGrid(): void {
     [
       "# Cut list — saw grid (layout: " + layout + ", saw vs CNC vs mill)",
       "",
+      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}.`,
+      "",
       "## Workflow rules (load-bearing)",
       "",
       "1. One tool up at a time: stow both flips before ripping.",
@@ -151,13 +199,24 @@ function mainGrid(): void {
   );
   for (const w of [
     `MEASURE: H floor->saw-table (using ${both(g.H)} — override --H)`,
-    `MEASURE: saw base footprint (using 460x410mm — override in GridPlan)`,
-    `MEASURE: saw base->table off-stand (using 200mm — stand legs to suit)`,
-    `MEASURE: planer bed above base (using 150mm — drum math)`,
-    `MEASURE: jointer bed above base (using 100mm — drum math)`,
+    `MEASURE: saw base footprint (using ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)} — override --sawBaseW/--sawBaseD)`,
+    `MEASURE: saw base->table off-stand (using ${both(plan.sawBaseToTable)} — override --sawBaseToTable)`,
+    `MEASURE: planer bed above base (using ${both(bedOf("planer"))} — override --planerBed)`,
+    `MEASURE: jointer bed above base (using ${both(bedOf("jointer"))} — override --jointerBed)`,
+    `MEASURE: planer + jointer masses (bathroom scale) — sizes the flip counterweight`,
     `DECIDE: jointer flip counterweight (gas strut vs paver in drum base)`,
   ])
     console.log(`warn: ${w}`);
+  if (process.argv.includes("--verify")) {
+    const issues = gridPlanIssues(plan);
+    if (issues.length) {
+      for (const i of issues) console.error(`verify: FAIL ${i}`);
+      process.exit(1);
+    }
+    console.log(
+      `verify: OK — 0 overlaps (up + stowed), tool tables on ${both(g.H)}, flats at ${both(g.H - g.supportDrop)}, both sweeps clear`,
+    );
+  }
 }
 
 function main(): void {

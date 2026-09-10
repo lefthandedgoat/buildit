@@ -10,7 +10,7 @@
 //
 // All dims in mm internally; grid mode speaks inches at the boundary.
 
-import type { Box } from "./assembly.ts";
+import { type Box, assemblyOverlaps } from "./assembly.ts";
 
 export interface GridSpec {
   S: number; // module side
@@ -1497,6 +1497,80 @@ export function sweepCollisions(
     });
   });
   return hits;
+}
+
+/**
+ * Structural verification for a grid plan: empty array = every invariant
+ * the plan promises still holds. Reusable by the CLI (`--verify`) so
+ * measured tool numbers can be swapped in without silently breaking the
+ * datums the whole plan is built on. Hardware joints are excluded from the
+ * no-overlap rule by design (axle/pillows are joint, not interfering).
+ */
+export function gridPlanIssues(plan: GridPlan): string[] {
+  const issues: string[] = [];
+  const g = plan.spec;
+  const up = gridBoxes(plan);
+  const stowed = gridBoxes(plan, true);
+  for (const [a, b] of assemblyOverlaps(up))
+    issues.push(`up-state overlap: ${a.partId} ~ ${b.partId}`);
+  for (const [a, b] of assemblyOverlaps(stowed))
+    issues.push(`stowed overlap: ${a.partId} ~ ${b.partId}`);
+  // Datums: saw table exactly on H; every support top (loose-lay panel or
+  // stowed drum flat) exactly supportDrop below it.
+  const saw = up.find((b) => b.partId.endsWith("-sawbody"));
+  if (!saw) issues.push("no sawbody box in plan");
+  else if (Math.abs(saw.z + saw.dz - g.H) > 1e-9)
+    issues.push(`saw table ${saw.z + saw.dz} != H ${g.H}`);
+  const supportTop = g.H - g.supportDrop;
+  for (const p of up.filter((b) => b.partId.endsWith("-panel")))
+    if (Math.abs(p.z + p.dz - supportTop) > 1e-9)
+      issues.push(`panel ${p.partId} top ${p.z + p.dz} != ${supportTop}`);
+  for (const f of stowed.filter((b) => b.partId.includes("-drum-flat")))
+    if (Math.abs(f.z + f.dz - supportTop) > 1e-9)
+      issues.push(`flat ${f.partId} top ${f.z + f.dz} != ${supportTop}`);
+  // Per drum: tool table on H, no floor dig mid-swing, exact 180deg sweep
+  // clear of every non-rotating part (wedges are pulled; hardware is joint).
+  const totalD = Math.max(...plan.bays.map((b) => b.y + b.d));
+  for (const bay of plan.bays.filter((b) => b.kind === "flip")) {
+    const tool = plan.flipTools[bay.id];
+    if (!tool) {
+      issues.push(`${bay.id}: no flip tool configured`);
+      continue;
+    }
+    const dir = bay.flipDir ?? 1;
+    const drum = flipRectBay(g, bay.id, 0, 0, bay.w, bay.d, tool);
+    const base = drum.rotating.find((b) => b.partId.endsWith("-tool-base"));
+    if (!base || Math.abs(base.z + base.dz - g.H) > 1e-9)
+      issues.push(
+        `${bay.id}: tool table ${base ? base.z + base.dz : "missing"} != H ${g.H}`,
+      );
+    if (drum.A - drum.swingRadius < 0)
+      issues.push(
+        `${bay.id}: axle ${drum.A.toFixed(1)} < swing ${drum.swingRadius.toFixed(1)} — tool digs the floor`,
+      );
+    const rotatingIds = new Set(drum.rotating.map((b) => b.partId));
+    const obstacles = up.filter(
+      (b) =>
+        !rotatingIds.has(b.partId) &&
+        b.hardware !== true &&
+        !b.partId.includes("-wedge"),
+    );
+    const oy = totalD - bay.y - bay.d;
+    const placed = drum.rotating.map((b) => ({
+      ...b,
+      x: b.x + bay.x,
+      y: b.y + oy,
+    }));
+    for (const h of sweepCollisions(
+      placed,
+      drum.axleY + oy,
+      drum.A,
+      dir,
+      obstacles,
+    ))
+      issues.push(`${bay.id}: sweep hits ${h.partId} at ${h.deg}deg`);
+  }
+  return issues;
 }
 
 // ---- full-width asymmetric (96x64): saw side 3x32, flip side 2x48 ----------

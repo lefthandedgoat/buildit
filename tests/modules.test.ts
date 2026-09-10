@@ -7,10 +7,12 @@ import {
   flipRectBay,
   frameRectBoxes,
   planAsymmetric,
+  planAsymmetric96,
   stowBoxes,
   sweepCollisions,
   sweepHitsZone,
   gridBoxes,
+  gridPlanIssues,
   gridPlanSvg,
   both,
   type FlipTool,
@@ -360,6 +362,26 @@ describe("saw-bay frontback yields zero ledges (table overhang forbids the band)
     assert.ok(
       boxesOverlap(frontLedge, sawBody),
       "expected the hypothetical ledge to hit the table",
+    );
+  });
+});
+
+describe("grid plan verification (CLI --verify)", () => {
+  it("passes the shipped 96x64 plan", () => {
+    assert.deepEqual(gridPlanIssues(planAsymmetric96()), []);
+  });
+
+  it("catches an impossible measured bed height", () => {
+    // A jointer/planer that stands 350mm above its base puts the axle so
+    // high that the drum underside sweeps the floor and the frame. The
+    // checker is the guard against entering a bad measurement by hand.
+    const bad = planAsymmetric96();
+    bad.flipTools.fplan = { ...bad.flipTools.fplan, baseToTable: 350 };
+    const issues = gridPlanIssues(bad);
+    assert.ok(issues.length > 0, "expected failures");
+    assert.ok(
+      issues.some((i) => i.includes("digs the floor")),
+      `expected a floor-dig issue, got: ${issues.join("; ")}`,
     );
   });
 });
