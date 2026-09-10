@@ -78,6 +78,14 @@ export interface FlipTool {
   feedDir: 1 | -1;
   /** Feed axis: lateral (x) or front-back (y). Drums always pivot on X. */
   feedAxis: "x" | "y";
+  /**
+   * Slide the tool toward its outfeed as a fraction (0..1) of the free
+   * platform travel. 0 = centred. The infeed end of the bay gains an
+   * outboard support table; the outfeed hand-off to the neighbouring bay
+   * shortens. X position contributes nothing to the flip balance (the drum
+   * rotates about X), so the only limit is staying on the platform.
+   */
+  shiftFrac?: number;
 }
 
 export interface Bay {
@@ -562,6 +570,7 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
   // SVG/plan y grows down; grid row 0 (front) sits at -y. Flip the row so
   // front renders at the bottom: oy mirrors the bay y within total depth.
   const totalD = Math.max(...plan.bays.map((b) => b.y + b.d));
+  const totalW = Math.max(...plan.bays.map((b) => b.x + b.w));
   for (const bay of plan.bays) {
     const { id: station, kind } = bay;
     const ox = bay.x;
@@ -589,6 +598,44 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
           ...stowBoxes(wedges, drum.axleY, drum.A),
         );
       else out.push(...drum.rotating, ...wedges);
+      // Infeed support: where a slid flip bay's infeed end IS a grid edge,
+      // put a fixed mini table outboard of it, carried by one leg at the far
+      // end. Nothing can live inside the bay at bed height — the drum sweeps
+      // it (verified), which is why this sits outside the sweep.
+      if (tool.feedAxis === "x" && (tool.shiftFrac ?? 0) > 0) {
+        const west = tool.feedDir > 0; // infeed is the bay's low-x end
+        const edge = west ? bay.x : bay.x + bay.w;
+        if (west ? edge === 0 : edge === totalW) {
+          const L = 600;
+          const top = g.H - g.supportDrop; // top face, 3mm under H
+          out.push(
+            box(
+              `${station}-infeed-table`,
+              `${station} infeed table ${both(L)}x${both(tool.tableD)}`,
+              west ? edge - L : edge,
+              oy + (bay.d - tool.tableD) / 2,
+              top - 19,
+              L,
+              tool.tableD,
+              19,
+              "laminate",
+              "infeed support at H-3; bolts to the frame, leg at the far end",
+            ),
+            box(
+              `${station}-infeed-leg`,
+              `${station} infeed table leg`,
+              west ? edge - L + 20 : edge + L - 58,
+              oy + (bay.d - 89) / 2,
+              0,
+              38,
+              89,
+              top - 19,
+              "saw",
+              "2x4 leg to the floor; carries the infeed table",
+            ),
+          );
+        }
+      }
       stamp();
       continue;
     }
@@ -1117,6 +1164,7 @@ export const JOINTER_FLIP: FlipTool = {
   aboveTable: 80, // bed casting above the tables (fence removed to flip)
   feedDir: -1, // east->west; exit over the STOWED planer flat (one-tool-up)
   feedAxis: "x",
+  shiftFrac: 0.9, // infeed table on the east; outfeed reaches toward fplan
 };
 
 /** Feed direction lives on FlipTool.feedDir (+1 west->east). */
@@ -1185,7 +1233,12 @@ export function flipRectBay(
       process,
       note,
     );
-  const toolX0 = (W - tool.tableW) / 2;
+  const slack = (inR - inL - tool.tableW) / 2; // free travel on the platform
+  const shiftX =
+    tool.feedAxis === "x"
+      ? (tool.shiftFrac ?? 0) * slack * (tool.feedDir > 0 ? 1 : -1)
+      : 0;
+  const toolX0 = (W - tool.tableW) / 2 + shiftX;
   const toolY0 = (D - tool.tableD) / 2;
   const bedT = 25; // working-table slab thickness
   const headW = Math.round(tool.tableW * 0.4); // head along the feed axis
@@ -1446,6 +1499,7 @@ export const PLANER_LATERAL: FlipTool = {
   aboveTable: 250, // motor housing above bed
   feedDir: 1, // west->east; exit over the jointer bay
   feedAxis: "x",
+  shiftFrac: 0.9, // infeed table on the west; outfeed reaches toward fjoin
 };
 
 /** 76x60 asymmetric: saw side 28+24+24 over 28in deep, flip side 32+44. */
@@ -1597,6 +1651,13 @@ export function gridPlanIssues(plan: GridPlan): string[] {
       issues.push(
         `${bay.id}: axle ${drum.A.toFixed(1)} < swing ${drum.swingRadius.toFixed(1)} — tool digs the floor`,
       );
+    const plat = drum.rotating.find((b) => b.partId.endsWith("-drum-platform"));
+    if (
+      plat &&
+      base &&
+      (base.x < plat.x - 1e-9 || base.x + base.dx > plat.x + plat.dx + 1e-9)
+    )
+      issues.push(`${bay.id}: tool table off the drum platform`);
     const rotatingIds = new Set(drum.rotating.map((b) => b.partId));
     const obstacles = up.filter(
       (b) =>

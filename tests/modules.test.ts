@@ -27,8 +27,11 @@ const boxes = gridBoxes(plan);
 
 describe("96x48 front-feed grid fit", () => {
   it("footprints 96in x 48in: tool row saw28+planer24+jointer44, back tops", () => {
-    const xs = boxes.flatMap((b) => [b.x, b.x + b.dx]);
-    const ys = boxes.flatMap((b) => [b.y, b.y + b.dy]);
+    // The infeed support tables are auxiliary furniture outboard of the
+    // grid; the frame footprint is what these numbers describe.
+    const grid = boxes.filter((b) => !b.partId.includes("-infeed-"));
+    const xs = grid.flatMap((b) => [b.x, b.x + b.dx]);
+    const ys = grid.flatMap((b) => [b.y, b.y + b.dy]);
     assert.equal(Math.max(...xs) - Math.min(...xs), 711 + 610 + 1118);
     assert.equal(Math.max(...ys) - Math.min(...ys), 813 + 406);
     assert.equal(plan.bays.length, 6);
@@ -217,8 +220,9 @@ describe("asymmetric narrow grid (76x60 saw side + flip side)", () => {
     const aplan = m.planAsymmetric();
     const gg = aplan.spec;
     const aboxes = m.gridBoxes(aplan);
-    const xs = aboxes.flatMap((b) => [b.x, b.x + b.dx]);
-    const ys = aboxes.flatMap((b) => [b.y, b.y + b.dy]);
+    const grid = aboxes.filter((b) => !b.partId.includes("-infeed-"));
+    const xs = grid.flatMap((b) => [b.x, b.x + b.dx]);
+    const ys = grid.flatMap((b) => [b.y, b.y + b.dy]);
     assert.equal(Math.max(...xs) - Math.min(...xs), 610 + 711 + 610);
     assert.equal(Math.max(...ys) - Math.min(...ys), 711 + 813);
     assert.equal(aplan.bays.length, 5);
@@ -301,6 +305,46 @@ describe("tool massing reads as a machine", () => {
   });
 });
 
+describe("outfeed shift + outboard infeed support", () => {
+  it("slides each lateral tool toward its outfeed, staying on the platform", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    for (const id of ["fplan", "fjoin"]) {
+      const plat = bs.find((b) => b.partId === `${id}-drum-platform`)!;
+      const table = bs.find((b) => b.partId === `${id}-tool-base`)!;
+      const tool = p.flipTools[id];
+      assert.ok(table.x >= plat.x && table.x + table.dx <= plat.x + plat.dx);
+      const west = table.x - plat.x;
+      const east = plat.x + plat.dx - (table.x + table.dx);
+      if (tool.feedDir > 0) assert.ok(east < west, `${id} should sit east`);
+      else assert.ok(west < east, `${id} should sit west`);
+      assert.ok(Math.min(west, east) > 5, `${id} keeps clearance`);
+    }
+  });
+
+  it("puts a leg-carried infeed table outboard at each grid edge", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    const totalW = Math.max(...p.bays.map((b) => b.x + b.w));
+    const tables = bs.filter((b) => b.partId.endsWith("-infeed-table"));
+    const legs = bs.filter((b) => b.partId.endsWith("-infeed-leg"));
+    assert.equal(tables.length, 2);
+    assert.equal(legs.length, 2);
+    const planer = tables.find((b) => b.partId.startsWith("fplan"))!;
+    const jointer = tables.find((b) => b.partId.startsWith("fjoin"))!;
+    assert.ok(planer.x + planer.dx <= 0, "planer table is west of the grid");
+    assert.ok(jointer.x >= totalW, "jointer table is east of the grid");
+    for (const t of tables) {
+      assert.equal(t.z + t.dz, p.spec.H - p.spec.supportDrop);
+      assert.ok(t.dy >= 300, "wide enough to carry a board");
+    }
+    for (const l of legs) {
+      assert.equal(l.z, 0);
+      assert.equal(l.dz, p.spec.H - p.spec.supportDrop - 19);
+    }
+  });
+});
+
 // Shared exact-sweep prover: every flip drum in a plan rotates 180deg
 // toward its open side without touching any obstacle (frames, panels,
 // tools, re-seated wedges excluded — pulled to flip; hardware is joint).
@@ -345,8 +389,10 @@ describe("full-width asymmetric (96x64 saw side + flip side)", () => {
     const { assemblyOverlaps: ov } = await import("../src/assembly.ts");
     const p96 = m.planAsymmetric96();
     const boxes96 = m.gridBoxes(p96);
-    const xs = boxes96.flatMap((b) => [b.x, b.x + b.dx]);
-    const ys = boxes96.flatMap((b) => [b.y, b.y + b.dy]);
+    // Footprint = the grid frames; the infeed support tables sit outboard.
+    const grid96 = boxes96.filter((b) => !b.partId.includes("-infeed-"));
+    const xs = grid96.flatMap((b) => [b.x, b.x + b.dx]);
+    const ys = grid96.flatMap((b) => [b.y, b.y + b.dy]);
     assert.equal(Math.max(...xs) - Math.min(...xs), 3 * 813);
     assert.equal(Math.max(...ys) - Math.min(...ys), 2 * 813);
     assert.deepEqual(ov(boxes96), []);
