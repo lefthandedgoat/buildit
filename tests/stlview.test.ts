@@ -59,6 +59,23 @@ describe("stl viewer page", () => {
     assert.ok(!html.includes('"partId":"leg"'));
   });
 
+  it("draws optional feed arrows (direction reads at any rotation)", () => {
+    const arrows = [
+      {
+        from: [0, 0, 900] as [number, number, number],
+        to: [500, 0, 900] as [number, number, number],
+        label: "planer feed",
+      },
+    ];
+    const withArrows = stlViewerHtml(stl, "bench", boxes, "light", arrows);
+    assert.ok(withArrows.includes('"label":"planer feed"'));
+    assert.ok(withArrows.includes("ARROWS"));
+    assert.ok(withArrows.includes("ARROW_COLOR"));
+    // No arrows passed: nothing drawn, old pages unchanged.
+    assert.ok(html.includes("const ARROWS=[];"));
+    assert.ok(!html.includes("planer feed"));
+  });
+
   it("groups identical boxes for the tree (seat/legs/aprons)", () => {
     const groups = groupBoxes(boxes);
     assert.deepEqual(

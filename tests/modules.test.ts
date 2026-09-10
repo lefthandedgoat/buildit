@@ -4,6 +4,7 @@ import {
   JOINTER_FLIP,
   PLANER_FLIP,
   defaultPlan,
+  feedArrows,
   flipRectBay,
   frameRectBoxes,
   planAsymmetric,
@@ -234,6 +235,32 @@ describe("asymmetric narrow grid (76x60 saw side + flip side)", () => {
     // Planer lateral drum swing still clears the floor in the 32in bay.
     const drum = m.flipRectBay(gg, "t", 0, 0, 813, 813, m.PLANER_LATERAL);
     assert.ok(drum.A - drum.swingRadius >= 0);
+  });
+});
+
+describe("feed arrows (3D viewer hint)", () => {
+  it("one per flip bay, along the feed axis, above the tool table", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    const arrows = feedArrows(p, bs);
+    assert.equal(arrows.length, 2);
+    const byLabel = Object.fromEntries(arrows.map((a) => [a.label, a]));
+    const planer = byLabel["planer 59313 feed"];
+    const jointer = byLabel["jointer 6in feed"];
+    assert.ok(planer, "planer arrow present");
+    assert.ok(jointer, "jointer arrow present");
+    // Planer feeds west->east; the jointer feeds east->west into it.
+    assert.ok(planer.to[0] > planer.from[0], "planer must point +x");
+    assert.ok(jointer.to[0] < jointer.from[0], "jointer must point -x");
+    for (const a of arrows) {
+      assert.equal(a.from[1], a.to[1], "arrow stays in one row");
+      assert.ok(
+        Math.abs(a.from[2] - (p.spec.H + 6)) < 1e-9,
+        "arrow floats just above the working table",
+      );
+    }
+    // The planer's arrow starts west of the jointer's tool and points at it.
+    assert.ok(planer.to[0] < jointer.from[0], "hand-off runs toward the jointer");
   });
 });
 

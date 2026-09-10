@@ -136,6 +136,13 @@ export function stationsOf(boxes: Pick<Box, "station">[]): string[] {
  * stage like the shop 3D tab). Threaded into CSS + canvas paint. */
 export type ViewerTheme = "dark" | "light";
 
+/** Optional feed-direction hint drawn over the model (3D arrows). */
+export interface ViewerArrow {
+  from: [number, number, number];
+  to: [number, number, number];
+  label?: string;
+}
+
 interface ViewerPalette {
   page: string;
   ink: string;
@@ -148,6 +155,7 @@ interface ViewerPalette {
   clear: string;
   hiStroke: string;
   edgeStroke: string;
+  arrow: string;
 }
 
 const PALETTES: Record<ViewerTheme, ViewerPalette> = {
@@ -163,6 +171,7 @@ const PALETTES: Record<ViewerTheme, ViewerPalette> = {
     clear: "#111",
     hiStroke: "rgba(255,255,255,.9)",
     edgeStroke: "rgba(0,0,0,.25)",
+    arrow: "#34d399",
   },
   light: {
     page: "#f5f5f4",
@@ -176,6 +185,7 @@ const PALETTES: Record<ViewerTheme, ViewerPalette> = {
     clear: "#f5f5f4",
     hiStroke: "rgba(12,74,110,.9)",
     edgeStroke: "rgba(68,64,60,.35)",
+    arrow: "#047857",
   },
 };
 
@@ -184,6 +194,7 @@ export function stlViewerHtml(
   title: string,
   boxes?: Box[],
   theme: ViewerTheme = "dark",
+  arrows: ViewerArrow[] = [],
 ): string {
   const escTitle = title
     .replace(/&/g, "&amp;")
@@ -232,6 +243,8 @@ export function stlViewerHtml(
 <script>
 "use strict";
 const THEME_CLEAR=${JSON.stringify(pal.clear)};
+const ARROW_COLOR=${JSON.stringify(pal.arrow)};
+const ARROWS=${JSON.stringify(arrows).replace(/</g, "\\x3c")};
 const THEME_HI=${JSON.stringify(pal.hiStroke)};
 const THEME_EDGE=${JSON.stringify(pal.edgeStroke)};
 const STL = \`${jsEscape(stlText)}\`;
@@ -706,6 +719,34 @@ function frame(t){
     ctx.fill();
     ctx.strokeStyle=(isSel||isSib||isStSel||isStKin||isMachSel)?THEME_HI:THEME_EDGE;
     ctx.lineWidth=(isSel||isSib||isStSel||isStKin||isMachSel)?2:1; ctx.stroke();
+  }
+  // Feed-direction arrows: drawn last so they read at any rotation (a hint,
+  // not a part; the plan view draws the same arrows in 2D).
+  if(ARROWS.length){
+    const proj=p=>{ const q=rot(p); return [W/2+q[0]*scale, H/2-q[1]*scale]; };
+    ctx.lineCap="round"; ctx.lineJoin="round";
+    for(const a of ARROWS){
+      const p0=proj(a.from), p1=proj(a.to);
+      const dx=p1[0]-p0[0], dy=p1[1]-p0[1], len=Math.hypot(dx,dy);
+      if(len<10) continue;
+      const ux=dx/len, uy=dy/len, head=Math.min(20,len*0.4);
+      const bx=p1[0]-ux*head, by=p1[1]-uy*head;
+      ctx.strokeStyle=ARROW_COLOR; ctx.fillStyle=ARROW_COLOR; ctx.lineWidth=5;
+      ctx.beginPath(); ctx.moveTo(p0[0],p0[1]); ctx.lineTo(bx,by); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(p1[0],p1[1]);
+      ctx.lineTo(bx-uy*head*0.5, by+ux*head*0.5);
+      ctx.lineTo(bx+uy*head*0.5, by-ux*head*0.5);
+      ctx.closePath(); ctx.fill();
+      if(a.label){
+        const mx=(p0[0]+p1[0])/2, my=(p0[1]+p1[1])/2-10;
+        ctx.font="bold 14px system-ui, -apple-system, sans-serif";
+        ctx.textAlign="center"; ctx.textBaseline="bottom";
+        ctx.lineWidth=4; ctx.strokeStyle=THEME_CLEAR;
+        ctx.strokeText(a.label, mx, my);
+        ctx.fillStyle=ARROW_COLOR; ctx.fillText(a.label, mx, my);
+      }
+    }
   }
   requestAnimationFrame(frame);
 }

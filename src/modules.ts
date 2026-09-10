@@ -11,6 +11,7 @@
 // All dims in mm internally; grid mode speaks inches at the boundary.
 
 import { type Box, assemblyOverlaps } from "./assembly.ts";
+import type { ViewerArrow } from "./stlview.ts";
 
 export interface GridSpec {
   S: number; // module side
@@ -636,6 +637,31 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
 // ---- plan view -------------------------------------------------------------
 
 const r2 = (n: number): string => String(Math.round(n * 100) / 100);
+
+/**
+ * Feed-direction arrows for one grid plan: one per flip bay, run just above
+ * the working table from the infeed end to the outfeed end, extending a
+ * little past the tool so the hand-off toward the neighbouring bay reads.
+ * The 3D viewer draws these so orientation is unambiguous at any rotation
+ * (the top-down plan view carries the same arrows).
+ */
+export function feedArrows(plan: GridPlan, boxes: Box[]): ViewerArrow[] {
+  const out: ViewerArrow[] = [];
+  for (const bay of plan.bays.filter((b) => b.kind === "flip")) {
+    const tool = plan.flipTools[bay.id];
+    const base = boxes.find((b) => b.partId === `${bay.id}-tool-base`);
+    if (!tool || !base) continue;
+    const fwd = tool.feedDir > 0; // +1 west->east
+    const y = base.y + base.dy / 2;
+    const z = base.z + base.dz + 6; // just above the tool's working table
+    out.push({
+      from: [fwd ? base.x - 40 : base.x + base.dx + 40, y, z],
+      to: [fwd ? base.x + base.dx + 40 : base.x - 40, y, z],
+      label: `${tool.name} feed`,
+    });
+  }
+  return out;
+}
 
 /**
  * Top-down bay plan: saw table (rip solid + crosscut ghost), flip tools

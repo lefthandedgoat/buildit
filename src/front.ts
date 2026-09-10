@@ -31,6 +31,7 @@ import {
   DEFAULT_GRID,
   both,
   defaultPlan,
+  feedArrows,
   planAsymmetric,
   planAsymmetric96,
   gridBoxes,
@@ -153,6 +154,9 @@ function mainGrid(): void {
     Object.values(plan.flipTools).find((t) => t.name.includes(match))
       ?.baseToTable ?? 0;
   const boxes = gridBoxes(plan);
+  // Same feed arrows as the plan view, in 3D: the viewer auto-rotates, so
+  // without them the board direction is impossible to read from a still.
+  const arrows = feedArrows(plan, boxes);
   const outDir = arg("--out", "examples/grid-2x3");
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "grid-plan.svg"), gridPlanSvg(plan));
@@ -184,6 +188,7 @@ function mainGrid(): void {
       "saw grid — drag to rotate",
       boxes,
       "light",
+      arrows,
     ),
   );
   const cutlist =
