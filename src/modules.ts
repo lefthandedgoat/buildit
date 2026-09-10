@@ -1209,6 +1209,63 @@ export function flipRectBay(
     backRail: false,
     ledges: "sides",
   });
+  // Second post pair in the 45mm strip between the corner post and the
+  // drum's X band (cheekOutL): the only inboard room the sweep leaves. The
+  // pair is X-disjoint from every rotating part, so it clears the flip at
+  // any height; it carries a matching top rail and floor stretcher.
+  const inX = cheekOutL - g.frontPostFace;
+  const frameTopZ = H - g.supportDrop - g.panelT;
+  // The back post lands on the existing floor stretcher (z = stretcherH)
+  // rather than through it.
+  for (const [suffix, py, pz] of [
+    ["in-f", 0, 0],
+    ["in-b", D - g.post, g.stretcherH],
+  ] as const)
+    frame.push(
+      box(
+        `${station}-post-${suffix}`,
+        `${station} inboard post`,
+        ox + inX,
+        oy + py,
+        pz,
+        g.frontPostFace,
+        g.post,
+        frameTopZ - pz,
+        "saw",
+        pz > 0
+          ? "store 2x4; second post pair, lands on the back stretcher"
+          : "store 2x4; second post pair, butts the drum band",
+      ),
+    );
+  frame.push(
+    // Top tie is a 19mm strip inset to x 64..83: the ledge owns x 38..57 at
+    // this height, and a full 38mm rail would foul the jointer's wedges
+    // (their axle sits higher).
+    box(
+      `${station}-rail-in`,
+      `${station} inboard top tie`,
+      ox + inX + g.ledgeW,
+      oy + g.post,
+      frameTopZ - g.railH,
+      g.ledgeW,
+      D - 2 * g.post,
+      g.railH,
+      "saw",
+      "19mm strip; ties the second post pair at the top",
+    ),
+    box(
+      `${station}-stretch-in`,
+      `${station} inboard stretcher`,
+      ox + inX,
+      oy + g.post,
+      0,
+      g.stretcherT,
+      D - 2 * g.post,
+      g.stretcherH,
+      "saw",
+      "store 2x4 at floor; ties the second post pair",
+    ),
+  );
   const B = (
     partId: string,
     label: string,
@@ -1563,41 +1620,78 @@ export function sweepCollisions(
 ): SweepHit[] {
   const hits: SweepHit[] = [];
   const EPS = 1e-6;
-  const inside = (b: Box, p: [number, number, number]): boolean =>
-    p[0] > b.x + EPS &&
-    p[0] < b.x + b.dx - EPS &&
-    p[1] > b.y + EPS &&
-    p[1] < b.y + b.dy - EPS &&
-    p[2] > b.z + EPS &&
-    p[2] < b.z + b.dz - EPS;
-  rotating.forEach((b) => {
-    const corners: [number, number, number][] = [];
-    for (const px of [b.x, b.x + b.dx])
-      for (const py of [b.y, b.y + b.dy])
-        for (const pz of [b.z, b.z + b.dz]) corners.push([px, py, pz]);
-    corners.forEach(([px, py, pz], ci) => {
-      const r = Math.hypot(py - axleY, pz - A);
-      if (r < 1e-9) return;
-      const a0 = Math.atan2((py - axleY) * dir, pz - A);
-      for (let s = 0; s * stepDeg <= 180; s++) {
-        const a = a0 + (s * stepDeg * Math.PI) / 180;
-        const q: [number, number, number] = [
-          px,
-          axleY + Math.sin(a) * r * dir,
-          A + Math.cos(a) * r,
-        ];
-        if (obstacles.some((o) => inside(o, q))) {
-          const o = obstacles.find((oo) => inside(oo, q))!;
-          hits.push({
-            partId: `${b.partId}#${ci}>${o.partId}`,
-            corner: ci,
-            deg: s * stepDeg,
-            at: q,
-          });
-          return;
-        }
+  // Exact sweep test: rotate each box about the X axle in stepDeg steps and
+  // test its rotated Y-Z rectangle (an OBB) against every obstacle's Y-Z
+  // rectangle with the separating-axis theorem. Corner-point sampling alone
+  // misses face-on strikes (a post under the middle of the platform shares
+  // the box's X span but no corner lands inside it); SAT has no such gap,
+  // and unlike a conservative disc test it does not flag the neighbouring
+  // row's parts.
+  const xOverlap = (a: Box, b: Box): boolean =>
+    a.x < b.x + b.dx - EPS && b.x < a.x + a.dx - EPS;
+  const rectAt = (b: Box, deg: number): [number, number][] => {
+    const pts: [number, number][] = [];
+    for (const py of [b.y, b.y + b.dy])
+      for (const pz of [b.z, b.z + b.dz]) {
+        const r = Math.hypot(py - axleY, pz - A);
+        const a0 = Math.atan2((py - axleY) * dir, pz - A);
+        const a = a0 + (deg * Math.PI) / 180;
+        pts.push([axleY + Math.sin(a) * r * dir, A + Math.cos(a) * r]);
       }
-    });
+    return pts;
+  };
+  const hitsRect = (pts: [number, number][], o: Box): boolean => {
+    const rect: [number, number][] = [
+      [o.y, o.z],
+      [o.y + o.dy, o.z],
+      [o.y, o.z + o.dz],
+      [o.y + o.dy, o.z + o.dz],
+    ];
+    const axes: [number, number][] = [
+      [1, 0],
+      [0, 1],
+      [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]],
+      [pts[2][0] - pts[0][0], pts[2][1] - pts[0][1]],
+    ];
+    for (const [ax, az] of axes) {
+      const len = Math.hypot(ax, az);
+      if (len < 1e-9) continue;
+      const uy = ax / len;
+      const uz = az / len;
+      let bMin = Infinity,
+        bMax = -Infinity,
+        oMin = Infinity,
+        oMax = -Infinity;
+      for (const p of pts) {
+        const v = p[0] * uy + p[1] * uz;
+        bMin = Math.min(bMin, v);
+        bMax = Math.max(bMax, v);
+      }
+      for (const p of rect) {
+        const v = p[0] * uy + p[1] * uz;
+        oMin = Math.min(oMin, v);
+        oMax = Math.max(oMax, v);
+      }
+      if (bMax < oMin + EPS || oMax < bMin + EPS) return false;
+    }
+    return true;
+  };
+  rotating.forEach((b) => {
+    const candidates = obstacles.filter((o) => xOverlap(b, o));
+    if (!candidates.length) return;
+    for (let deg = 0; deg <= 180; deg += stepDeg) {
+      const pts = rectAt(b, deg);
+      const o = candidates.find((c) => hitsRect(pts, c));
+      if (o) {
+        hits.push({
+          partId: `${b.partId}>${o.partId}`,
+          corner: -1,
+          deg,
+          at: [o.x, o.y, o.z],
+        });
+        return;
+      }
+    }
   });
   return hits;
 }

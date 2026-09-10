@@ -345,6 +345,79 @@ describe("outfeed shift + outboard infeed support", () => {
   });
 });
 
+describe("inboard post pair (flip bay stiffening)", () => {
+  it("sits in the 45mm strip, clear of the drum's X band, and is tied top+bottom", () => {
+    const p = planAsymmetric96();
+    const bs = gridBoxes(p);
+    for (const id of ["fplan", "fjoin"]) {
+      const posts = bs.filter(
+        (b) => b.partId === `${id}-post-in-f` || b.partId === `${id}-post-in-b`,
+      );
+      assert.equal(posts.length, 2);
+      const drumX0 = Math.min(
+        ...bs.filter((b) => b.partId.startsWith(`${id}-drum-`)).map((b) => b.x),
+      );
+      for (const post of posts) {
+        assert.ok(
+          post.x + post.dx <= drumX0 + 1e-9,
+          `${post.partId} must clear the drum's X band`,
+        );
+        assert.equal(post.dx, 38);
+      }
+      // The back post lands on the existing floor stretcher (z = 89).
+      const back = bs.find((b) => b.partId === `${id}-post-in-b`)!;
+      assert.equal(back.z, 89);
+      // Ties: 19mm strip at the top, stretcher at the floor.
+      const tie = bs.find((b) => b.partId === `${id}-rail-in`)!;
+      assert.equal(tie.dx, 19);
+      assert.equal(tie.z + tie.dz, p.spec.H - p.spec.supportDrop - p.spec.panelT);
+      assert.ok(bs.some((b) => b.partId === `${id}-stretch-in`));
+    }
+  });
+});
+
+describe("sweepCollisions has no face-on blind spot", () => {
+  it("flags a post under the middle of the platform (no rotating corner lands in it)", () => {
+    const p = planAsymmetric96();
+    const bay = p.bays.find((b) => b.id === "fplan")!;
+    const drum = flipRectBay(p.spec, bay.id, 0, 0, bay.w, bay.d, p.flipTools[bay.id]);
+    const all = gridBoxes(p);
+    const totalD = Math.max(...p.bays.map((b) => b.y + b.d));
+    const oy = totalD - bay.y - bay.d;
+    const rotatingIds = new Set(drum.rotating.map((b2) => b2.partId));
+    const obstacles = all.filter(
+      (b2) =>
+        !rotatingIds.has(b2.partId) &&
+        b2.hardware !== true &&
+        !b2.partId.includes("-wedge"),
+    );
+    const placed = drum.rotating.map((b2) => ({
+      ...b2,
+      x: b2.x + bay.x,
+      y: b2.y + oy,
+    }));
+    const post = {
+      partId: "hypo-inboard-post",
+      label: "hypo",
+      x: 600,
+      y: oy,
+      z: 0,
+      dx: 38,
+      dy: 89,
+      dz: 842,
+      process: "saw" as const,
+      note: "hypo",
+    };
+    assert.ok(
+      sweepCollisions(placed, drum.axleY + oy, drum.A, bay.flipDir ?? 1, [
+        ...obstacles,
+        post,
+      ]).length > 0,
+      "a face-on strike must be reported even when no corner lands in the post",
+    );
+  });
+});
+
 // Shared exact-sweep prover: every flip drum in a plan rotates 180deg
 // toward its open side without touching any obstacle (frames, panels,
 // tools, re-seated wedges excluded — pulled to flip; hardware is joint).
