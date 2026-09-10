@@ -38,6 +38,7 @@ import {
   gridPlanSvg,
 } from "./modules.ts";
 import { profileRect, drillHole, camProgram } from "./cam.ts";
+import { flipAssist, flipLoad, defaultCgMm } from "./flip.ts";
 
 function arg(flag: string, def: string): string {
   const i = process.argv.indexOf(flag);
@@ -208,6 +209,38 @@ function mainGrid(): void {
     `DECIDE: jointer flip counterweight (gas strut vs paver in drum base)`,
   ])
     console.log(`warn: ${w}`);
+  // The DECIDE item, as arithmetic: the drum's own balance is known from
+  // the plan; the tool mass is the one measured input (--planerMass/
+  // --jointerMass, CG defaults to mid-envelope, override --*Cg).
+  for (const bay of plan.bays.filter((b) => b.kind === "flip")) {
+    const l = flipLoad(plan, bay.id);
+    const tool = plan.flipTools[bay.id];
+    if (!tool) continue;
+    const which = l.toolName.includes("planer") ? "planer" : "jointer";
+    const flags = { mass: `--${which}Mass`, cg: `--${which}Cg` };
+    console.log(
+      `flip: ${bay.id} (${l.toolName}) — drum ${l.drumMassKg.toFixed(1)} kg, self-moment ${l.drumMomentKgM.toFixed(2)} kg.m (${l.drumMomentKgM < 0 ? "flat-heavy, rests tool-up" : "wants to fall"}); counterweight arm ${Math.round(l.counterweightArmMm)} mm, rim ${Math.round(l.swingRadiusMm)} mm`,
+    );
+    const massRaw = optArg(flags.mass);
+    const mass =
+      massRaw === null ? null : mmArg(flags.mass, Number.NaN);
+    if (mass === null) {
+      console.log(
+        `flip:   size the assist with ${flags.mass} KG (CG defaults to ${Math.round(defaultCgMm(tool.baseToTable, tool.aboveTable))} mm mid-envelope)`,
+      );
+      continue;
+    }
+    const cgRaw = optArg(flags.cg);
+    const cg =
+      cgRaw === null ? defaultCgMm(tool.baseToTable, tool.aboveTable) : mmArg(flags.cg, Number.NaN);
+    const a = flipAssist(l, mass, cg);
+    console.log(
+      `flip:   tool ${mass} kg @ CG ${Math.round(cg)} mm -> peak ${a.peakMomentKgM.toFixed(2)} kg.m (${Math.round(a.peakTorqueNm)} N.m), rim hold ${Math.round(a.rimForceN)} N (~${(a.rimForceN / 9.80665).toFixed(1)} kgf)` +
+        (a.neutralCounterweightKg > 0
+          ? `, neutral counterweight ${a.neutralCounterweightKg.toFixed(1)} kg at the flat face`
+          : ", self-holding — no assist needed"),
+    );
+  }
   if (process.argv.includes("--verify")) {
     const issues = gridPlanIssues(plan);
     if (issues.length) {
