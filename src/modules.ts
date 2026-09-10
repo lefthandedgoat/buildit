@@ -31,6 +31,9 @@ export interface GridSpec {
   platformT: number; // cart platform thickness
   /** Platform shoulder each side of a flip tool (tight drums; default 25). */
   drumPad?: number;
+  /** Cut both flip drums to the largest tool's platform (one slab size);
+   * trades a wider planer band for build simplicity. Default false. */
+  drumUniform?: boolean;
   rows: number;
   cols: number;
 }
@@ -52,6 +55,7 @@ export const DEFAULT_GRID: GridSpec = {
   cartWall: 19,
   platformT: 19,
   drumPad: 25,
+  drumUniform: false,
   rows: 2,
   cols: 3,
 };
@@ -568,6 +572,7 @@ export function standBoxes(
  * (drums flipped: flat faces at H-3, wedges dropped — they only lock up).
  */
 export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
+  const uniformDrum = drumSizeFor(plan.spec, Object.values(plan.flipTools));
   const { spec: g } = plan;
   const out: Box[] = [];
   // SVG/plan y grows down; grid row 0 (front) sits at -y. Flip the row so
@@ -589,7 +594,16 @@ export function gridBoxes(plan: GridPlan, stowedFlip = false): Box[] {
       const tool = plan.flipTools[station];
       if (tool === undefined)
         throw new Error(`flip bay ${station} has no tool in flipTools`);
-      const drum = flipRectBay(g, station, ox, oy, bay.w, bay.d, tool);
+      const drum = flipRectBay(
+        g,
+        station,
+        ox,
+        oy,
+        bay.w,
+        bay.d,
+        tool,
+        uniformDrum,
+      );
       // Wedges re-seat after the flip (mirrored with the drum); the rest of
       // the fixed set (axle, pillows, bearing rails) never moves.
       const stayPut = drum.fixed.filter((b) => !b.partId.includes("-wedge"));
@@ -1180,6 +1194,12 @@ export interface FlipRect {
   swingRadius: number;
 }
 
+/** Platform size (x along the axle, y across) for a uniform project drum. */
+export interface DrumSize {
+  w: number;
+  d: number;
+}
+
 export interface DrumPlacement {
   /** Outer face of each cheek: the rotating X band is cheekOutL..cheekOutR. */
   cheekOutL: number;
@@ -1191,10 +1211,30 @@ export interface DrumPlacement {
   toolX0: number;
   platformW: number;
   drumDepth: number;
-  /** "tool": drum sized by the machine; "bay": bay too narrow, old snug rule. */
-  sized: "tool" | "bay";
+  /** "tool": sized by the machine; "bay": bay too narrow, old snug rule;
+   * "uniform": cut to the project's largest tool so both drums are one size. */
+  sized: "tool" | "bay" | "uniform";
   /** The clamp moved the drum (the wanted position no longer fits the bay). */
   clamped: boolean;
+}
+
+/**
+ * Uniform drum size for a plan's flip tools: the largest tool's footprint
+ * plus `drumPad` each side, or undefined when the plan wants per-tool drums
+ * (spec.drumUniform). Both bays then cut the same four slabs.
+ */
+export function drumSizeFor(
+  g: GridSpec,
+  tools: Iterable<FlipTool>,
+): DrumSize | undefined {
+  if (g.drumUniform !== true) return undefined;
+  const pad = g.drumPad ?? 25;
+  const list = [...tools];
+  if (!list.length) return undefined;
+  return {
+    w: Math.max(...list.map((t) => t.tableW)) + 2 * pad,
+    d: Math.max(...list.map((t) => t.tableD)) + 2 * pad,
+  };
 }
 
 /**
@@ -1208,6 +1248,7 @@ export function drumPlacement(
   g: GridSpec,
   W: number,
   tool: FlipTool,
+  uniform?: DrumSize,
 ): DrumPlacement {
   const pad = g.drumPad ?? 25;
   const cheekT = 19;
@@ -1224,9 +1265,35 @@ export function drumPlacement(
   const tight = tool.tableW + 2 * pad;
   const stack = pad + cheekT; // platform shoulder + cheek
   const lo = 38 + 45; // west pillow's inboard face
-  // A bay too narrow for the tight drum keeps the old behaviour: fill the
-  // interior between the pillows (that is what the narrow plans were
-  // verified with), with whatever shoulder is left.
+  // Uniform drums: both bays are cut to the largest tool's platform, so the
+  // four slabs (2 platforms + 2 flat skins) are ONE size. The tool still
+  // rides `pad` off its outfeed end and the drum still stops against the
+  // outfeed-side pillow, so the tool lands exactly where the per-tool drum
+  // put it — the extra platform hangs INBOARD (that is the trade: the
+  // planer's band grows to the jointer's).
+  if (uniform !== undefined && uniform.w + 2 * cheekT <= W - 2 * lo) {
+    const outfeedEast = tool.feedDir > 0;
+    const cheekOutL = outfeedEast
+      ? Math.max(W - lo - (uniform.w + 2 * cheekT), lo)
+      : lo;
+    const cheekOutR = cheekOutL + uniform.w + 2 * cheekT;
+    return {
+      cheekOutL,
+      cheekOutR,
+      inL: cheekOutL + cheekT,
+      inR: cheekOutL + cheekT + uniform.w,
+      toolX0: outfeedEast
+        ? cheekOutR - cheekT - pad - tool.tableW
+        : cheekOutL + cheekT + pad,
+      platformW: uniform.w,
+      drumDepth: uniform.d,
+      sized: "uniform",
+      // By construction: the drum is defined as sitting at its stop.
+      clamped: true,
+    };
+  }
+  // Per-tool drum: sized by the machine (falling back to the bay's interior
+  // when the bay is too narrow for that), placed by the stop rule.
   const sized = tight <= snug ? "tool" : "bay";
   const platformW = Math.max(Math.min(snug, tight), tool.tableW);
   const want = (W - tool.tableW) / 2 + shiftX - stack;
@@ -1260,6 +1327,7 @@ export function flipRectBay(
   W: number,
   D: number,
   tool: FlipTool,
+  uniform?: DrumSize,
 ): FlipRect {
   const { H, railH, panelT, supportDrop } = g;
   const dPlat = 50;
@@ -1272,7 +1340,7 @@ export function flipRectBay(
   // Machine-sized drum (see drumPlacement): a narrower rotating part leaves
   // the bay's infeed side free for fixed structure, which the old
   // full-width drum swept away.
-  const place = drumPlacement(g, W, tool);
+  const place = drumPlacement(g, W, tool, uniform);
   const { inL, inR, drumDepth } = place;
   const dy0 = (D - drumDepth) / 2;
   const frame = frameRectBoxes(g, station, ox, oy, W, D, {
@@ -1491,6 +1559,31 @@ export function flipRectBay(
       "head + motor standing on the table (fence off to flip)",
     ),
   ];
+  // A uniform cut leaves a shoulder on the smaller tool's infeed side. The
+  // fixed in-bay table cannot reach past the bigger drum, so the shelf that
+  // carries stock in at bed height rides ON the drum (it sweeps with it, and
+  // its corners sit well inside the tool's swing radius).
+  if (place.sized === "uniform") {
+    const infeedEast = tool.feedDir < 0; // east->west feeds from the east
+    const shelfW = infeedEast
+      ? inR - (toolX0 + tool.tableW)
+      : toolX0 - inL;
+    if (shelfW >= 100)
+      rotating.push(
+        B(
+          "drum-infeed-shelf",
+          `drum infeed shelf`,
+          infeedEast ? toolX0 + tool.tableW : inL,
+          toolY0,
+          H - supportDrop - g.panelT,
+          shelfW,
+          tool.tableD,
+          g.panelT,
+          "laminate",
+          "bolted to the drum; carries stock into the tool across the uniform cut's shoulder",
+        ),
+      );
+  }
   // Bearing rails carry the pillows but duck under the side top rails
   // (high axles like the jointer's would otherwise collide with them).
   const railBottomZ = H - supportDrop - panelT - railH;
@@ -1832,7 +1925,16 @@ export function gridPlanIssues(plan: GridPlan): string[] {
       continue;
     }
     const dir = bay.flipDir ?? 1;
-    const drum = flipRectBay(g, bay.id, 0, 0, bay.w, bay.d, tool);
+    const drum = flipRectBay(
+      g,
+      bay.id,
+      0,
+      0,
+      bay.w,
+      bay.d,
+      tool,
+      drumSizeFor(g, Object.values(plan.flipTools)),
+    );
     const base = drum.rotating.find((b) => b.partId.endsWith("-tool-base"));
     if (!base || Math.abs(base.z + base.dz - g.H) > 1e-9)
       issues.push(

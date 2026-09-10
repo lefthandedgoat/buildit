@@ -16,7 +16,7 @@
 // scale); CG height defaults to mid-envelope but is a --*Cg override.
 
 import type { Box } from "./assembly.ts";
-import { flipRectBay, type GridPlan } from "./modules.ts";
+import { drumSizeFor, flipRectBay, type GridPlan } from "./modules.ts";
 
 /** Honey locust glue-up at shop moisture, kg/m3 (bracket 650-770). */
 export const LOCUST_KG_M3 = 700;
@@ -62,7 +62,16 @@ export function flipLoad(plan: GridPlan, bayId: string): FlipLoad {
   if (!bay) throw new Error(`no flip bay "${bayId}" in plan`);
   const tool = plan.flipTools[bayId];
   if (!tool) throw new Error(`no flip tool for bay "${bayId}"`);
-  const drum = flipRectBay(plan.spec, bayId, 0, 0, bay.w, bay.d, tool);
+  const drum = flipRectBay(
+    plan.spec,
+    bayId,
+    0,
+    0,
+    bay.w,
+    bay.d,
+    tool,
+    drumSizeFor(plan.spec, Object.values(plan.flipTools)),
+  );
   let drumMassKg = 0;
   let drumMomentKgM = 0;
   let flatOuterMm = Number.NaN;

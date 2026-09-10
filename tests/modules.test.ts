@@ -21,6 +21,7 @@ import {
   type GridPlan,
 } from "../src/modules.ts";
 import { assemblyOverlaps, boxesOverlap } from "../src/assembly.ts";
+import { flipLoad } from "../src/flip.ts";
 
 const plan = defaultPlan();
 const g = plan.spec;
@@ -407,6 +408,68 @@ describe("flip drums are sized by the machine, not by the bay", () => {
     )!;
     assert.ok(Math.abs(b.dx - (a.dx - 20)) < 1e-9, `${b.dx}`);
     assert.deepEqual(gridPlanIssues(tight), []);
+  });
+
+  it("--drumUniform cuts both platforms to one size without moving the tools", () => {
+    const base = planAsymmetric96();
+    const uni = planAsymmetric96({ ...base.spec, drumUniform: true });
+    const [a, b] = [gridBoxes(base), gridBoxes(uni)];
+    const plat = (bs: ReturnType<typeof gridBoxes>, id: string) =>
+      bs.find((x) => x.partId === `${id}-drum-platform`)!;
+    // One slab size across both bays, and it is the larger tool's.
+    assert.deepEqual(
+      [plat(b, "fplan").dx, plat(b, "fplan").dy],
+      [plat(b, "fjoin").dx, plat(b, "fjoin").dy],
+    );
+    assert.equal(plat(b, "fplan").dx, plat(a, "fjoin").dx);
+    // Cheeks share the depth too (heights still differ with the axle).
+    const cheek = (bs: ReturnType<typeof gridBoxes>, id: string) =>
+      bs.find((x) => x.partId === `${id}-drum-cheek-l`)!;
+    assert.equal(cheek(b, "fplan").dy, cheek(b, "fjoin").dy);
+    // The tools do not move: every verified feed geometry still reads.
+    for (const id of ["fplan", "fjoin"]) {
+      const t1 = a.find((x) => x.partId === `${id}-tool-base`)!;
+      const t2 = b.find((x) => x.partId === `${id}-tool-base`)!;
+      assert.equal(t2.x, t1.x, `${id} tool x`);
+      assert.equal(t2.y, t1.y, `${id} tool y`);
+    }
+    const handOff = (bs: ReturnType<typeof gridBoxes>) => {
+      const pt = bs.find((x) => x.partId === "fplan-tool-base")!;
+      const jf = bs.find((x) => x.partId === "fjoin-drum-flat")!;
+      const jt = bs.find((x) => x.partId === "fjoin-tool-base")!;
+      const pf = bs.find((x) => x.partId === "fplan-drum-flat")!;
+      return [jf.x - (pt.x + pt.dx), jt.x - (pf.x + pf.dx)];
+    };
+    assert.deepEqual(handOff(b), handOff(a));
+    assert.deepEqual(gridPlanIssues(uni), []);
+  });
+
+  it("the uniform shoulder carries a drum shelf, so infeed still lands at bed height", () => {
+    const uni = planAsymmetric96({
+      ...planAsymmetric96().spec,
+      drumUniform: true,
+    });
+    const bs = gridBoxes(uni);
+    const shelf = bs.find((x) => x.partId === "fplan-drum-infeed-shelf")!;
+    assert.ok(shelf, "planer bay gets the shelf");
+    assert.equal(shelf.z + shelf.dz, uni.spec.H - uni.spec.supportDrop);
+    assert.ok(shelf.dx >= 100, `${shelf.dx} should be a usable shoulder`);
+    // The jointer's tool fills its platform: no shelf there.
+    assert.equal(
+      bs.find((x) => x.partId === "fjoin-drum-infeed-shelf"),
+      undefined,
+    );
+    // Board path: fixed in-bay table -> shelf -> tool bed, all at H-3.
+    const tbl = bs.find((x) => x.partId === "fplan-inbay-table")!;
+    const table = bs.find((x) => x.partId === "fplan-tool-base")!;
+    const gap = shelf.x - (tbl.x + tbl.dx);
+    assert.ok(gap >= 0 && gap < 40, `infeed gap ${gap}`);
+    assert.ok(Math.abs(shelf.x + shelf.dx - table.x) < 1e-9);
+    // It rides the drum (so it is proven by the sweep), but sits inside the
+    // tool's own swing radius: the drum's rim does not grow.
+    const l = flipLoad(uni, "fplan");
+    const bare = flipLoad(planAsymmetric96(), "fplan");
+    assert.equal(l.swingRadiusMm, bare.swingRadiusMm);
   });
 
   it("the in-bay infeed table reaches the bay edge and stops short of the band", () => {

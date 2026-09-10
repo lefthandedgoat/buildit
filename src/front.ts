@@ -73,6 +73,7 @@ export function planBench(): BenchPlan {
  *   --sawBaseToTable MM        saw base bottom -> table top, off-stand
  *   --planerBed/--jointerBed MM  flip tool: base bottom -> working table
  *   --drumPad MM               flip drum: platform shoulder each side of the tool
+ *   --drumUniform              cut both flip drums to the largest tool's platform
  * Add --verify to re-prove the datums after changing any of them. */
 function mainGrid(): void {
   const IN = 25.4;
@@ -126,6 +127,9 @@ function mainGrid(): void {
   plan.sawBaseToTable = mmArg("--sawBaseToTable", plan.sawBaseToTable);
   g.drumPad =
     g.drumPad === undefined ? undefined : mmArg("--drumPad", g.drumPad);
+  // Uniform drums: cut both flip drums to the largest tool's platform so the
+  // four slabs are one size (the planer's band grows to the jointer's).
+  if (process.argv.includes("--drumUniform")) g.drumUniform = true;
   /** Positive kg value for --planerMass / --jointerMass. */
   const kgArg = (flag: string): number | null => {
     const raw = optArg(flag);
@@ -198,7 +202,7 @@ function mainGrid(): void {
     [
       "# Cut list — saw grid (layout: " + layout + ", saw vs CNC vs mill)",
       "",
-      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}; drum pad ${both(g.drumPad ?? 25)}.`,
+      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}; drum pad ${both(g.drumPad ?? 25)}${g.drumUniform ? " (uniform cut)" : ""}.`,
       "",
       "## Workflow rules (load-bearing)",
       "",
