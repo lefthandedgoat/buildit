@@ -34,6 +34,15 @@ export interface GridSpec {
   /** Cut both flip drums to the largest tool's platform (one slab size);
    * trades a wider planer band for build simplicity. Default false. */
   drumUniform?: boolean;
+  /** How far a flip bay's infeed side is built out (default "pair").
+   *   pair  — second post pair + top rail + floor stretcher + fixed table;
+   *           also the frame's third front-to-back portal.
+   *   table — the fixed infeed table alone, cantilevering off the frame's
+   *           side rail (a 137mm cantilever: 0.07mm under a hand press).
+   *   none  — neither: the outside table is the only infeed support.
+   * A single centred leg is not an option: the axle spans the bay at
+   * y axleY+/-12.5, z A+/-12.5 — exactly where it would have to stand. */
+  inbaySupport?: "pair" | "table" | "none";
   rows: number;
   cols: number;
 }
@@ -56,6 +65,7 @@ export const DEFAULT_GRID: GridSpec = {
   platformT: 19,
   drumPad: 25,
   drumUniform: false,
+  inbaySupport: "pair",
   rows: 2,
   cols: 3,
 };
@@ -1365,14 +1375,20 @@ export function flipRectBay(
   const strip = west
     ? place.cheekOutL - g.frontPostFace
     : W - g.frontPostFace - place.cheekOutR;
-  const bent =
+  // spec.inbaySupport chooses how far that strip is built out. The pair has
+  // to clear the side ledge (a bay this narrow would otherwise stack legs on
+  // the corner post) and the table has to be worth having.
+  const mode = g.inbaySupport ?? "pair";
+  const tableFits = mode !== "none" && strip >= inboardGap + 60;
+  const pairFits =
+    mode === "pair" &&
     strip >= inboardGap + g.railT + 60 &&
     (west
       ? pairX >= g.ledgeW + g.railT
       : pairX + g.railT <= W - g.ledgeW - g.railT);
   // The back post lands on the existing floor stretcher (z = stretcherH)
   // rather than through it.
-  if (bent)
+  if (pairFits)
     for (const [suffix, py, pz] of [
       ["in-f", 0, 0],
       ["in-b", D - g.post, g.stretcherH],
@@ -1393,7 +1409,7 @@ export function flipRectBay(
             : "store 2x4; second post pair, clears the drum band",
         ),
       );
-  if (bent)
+  if (pairFits)
     frame.push(
       box(
         `${station}-rail-in`,
@@ -1407,20 +1423,27 @@ export function flipRectBay(
         "saw",
         "store 2x4; ties the second post pair and carries the infeed table",
       ),
+    );
+  if (tableFits)
+    frame.push(
       box(
         `${station}-inbay-table`,
-        `${station} in-bay infeed table ${both(west ? pairX + g.railT : W - pairX)}x${both(tool.tableD)}`,
-        ox + (west ? 0 : pairX),
+        `${station} in-bay infeed table ${both(west ? place.cheekOutL - inboardGap : W - place.cheekOutR - inboardGap)}x${both(tool.tableD)}`,
+        ox + (west ? 0 : place.cheekOutR + inboardGap),
         oy + (D - tool.tableD) / 2,
         frameTopZ,
-        west ? pairX + g.railT : W - pairX,
+        west
+          ? place.cheekOutL - inboardGap
+          : W - place.cheekOutR - inboardGap,
         tool.tableD,
         g.panelT,
         "laminate",
-        "fixed in-bay infeed support at H-3; bolts to the frame, carried by the second post pair",
+        mode === "pair"
+          ? "fixed in-bay infeed support at H-3; bolts to the frame, carried by the second post pair"
+          : "fixed in-bay infeed support at H-3; cantilevers off the frame's side rail",
       ),
     );
-  if (bent)
+  if (pairFits)
     frame.push(
       box(
         `${station}-stretch-in`,

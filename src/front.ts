@@ -74,6 +74,7 @@ export function planBench(): BenchPlan {
  *   --planerBed/--jointerBed MM  flip tool: base bottom -> working table
  *   --drumPad MM               flip drum: platform shoulder each side of the tool
  *   --drumUniform              cut both flip drums to the largest tool's platform
+ *   --inbaySupport pair|table|none  flip bay infeed build-out (default pair)
  * Add --verify to re-prove the datums after changing any of them. */
 function mainGrid(): void {
   const IN = 25.4;
@@ -130,6 +131,11 @@ function mainGrid(): void {
   // Uniform drums: cut both flip drums to the largest tool's platform so the
   // four slabs are one size (the planer's band grows to the jointer's).
   if (process.argv.includes("--drumUniform")) g.drumUniform = true;
+  // Flip-bay infeed build-out: pair (default) | table | none. See GridSpec.
+  const inbay = arg("--inbaySupport", "pair");
+  if (inbay !== "pair" && inbay !== "table" && inbay !== "none")
+    bad(`--inbaySupport must be pair|table|none, got ${inbay}`);
+  g.inbaySupport = inbay as "pair" | "table" | "none";
   /** Positive kg value for --planerMass / --jointerMass. */
   const kgArg = (flag: string): number | null => {
     const raw = optArg(flag);
@@ -202,7 +208,7 @@ function mainGrid(): void {
     [
       "# Cut list — saw grid (layout: " + layout + ", saw vs CNC vs mill)",
       "",
-      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}; drum pad ${both(g.drumPad ?? 25)}${g.drumUniform ? " (uniform cut)" : ""}.`,
+      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}; drum pad ${both(g.drumPad ?? 25)}${g.drumUniform ? " (uniform cut)" : ""}; infeed bent ${g.inbaySupport ?? "pair"}.`,
       "",
       "## Workflow rules (load-bearing)",
       "",

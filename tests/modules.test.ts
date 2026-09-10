@@ -608,6 +608,74 @@ describe("the two flip bays are the same assembly", () => {
   });
 });
 
+describe("flip bay infeed build-out (spec.inbaySupport)", () => {
+  const withMode = (mode: "pair" | "table" | "none") => {
+    const base = planAsymmetric96();
+    return planAsymmetric96({
+      ...base.spec,
+      drumUniform: true,
+      inbaySupport: mode,
+    });
+  };
+
+  it("pair carries the table, table alone cantilevers, none leaves the outside table", () => {
+    for (const [mode, parts] of [
+      ["pair", 115],
+      ["table", 107],
+      ["none", 105],
+    ] as const) {
+      const p = withMode(mode);
+      assert.deepEqual(gridPlanIssues(p), [], mode);
+      assert.equal(gridBoxes(p).length, parts, `${mode} part count`);
+    }
+    const pair = gridBoxes(withMode("pair"));
+    for (const id of ["fplan", "fjoin"]) {
+      assert.ok(pair.some((b) => b.partId === `${id}-post-in-f`));
+      assert.ok(pair.some((b) => b.partId === `${id}-rail-in`));
+      assert.ok(pair.some((b) => b.partId === `${id}-stretch-in`));
+      assert.ok(pair.some((b) => b.partId === `${id}-inbay-table`));
+    }
+    const table = gridBoxes(withMode("table"));
+    for (const id of ["fplan", "fjoin"]) {
+      assert.ok(table.some((b) => b.partId === `${id}-inbay-table`));
+      assert.ok(!table.some((b) => b.partId === `${id}-post-in-f`));
+      assert.ok(!table.some((b) => b.partId === `${id}-rail-in`));
+      assert.ok(!table.some((b) => b.partId === `${id}-stretch-in`));
+    }
+    const none = gridBoxes(withMode("none"));
+    assert.ok(!none.some((b) => b.partId.includes("inbay-table")));
+    assert.ok(!none.some((b) => b.partId.includes("-post-in-")));
+    // The drum shelf is part of the drum, not the bent: it stays in all modes.
+    for (const bs of [pair, table, none])
+      assert.ok(bs.some((b) => b.partId === "fplan-drum-infeed-shelf"));
+  });
+
+  it("documents why the reduction is 'drop it', not 'one leg'", () => {
+    // A single centred leg under the table's inner end has nowhere to stand:
+    // the pivot axle owns that line.
+    const p = withMode("table");
+    const bay = p.bays.find((b) => b.id === "fplan")!;
+    const drum = flipRectBay(
+      p.spec,
+      "fplan",
+      0,
+      0,
+      bay.w,
+      bay.d,
+      p.flipTools.fplan!,
+    );
+    const axle = drum.fixed.find((b) => b.partId.endsWith("-axle"))!;
+    const leg = { y0: (bay.d - 89) / 2, y1: (bay.d - 89) / 2 + 89 };
+    const ov = (a0: number, a1: number, b0: number, b1: number) =>
+      a0 < b1 && b0 < a1;
+    assert.ok(
+      ov(leg.y0, leg.y1, axle.y, axle.y + axle.dy),
+      "a centred leg would intersect the axle",
+    );
+    assert.ok(ov(0, 842, axle.z, axle.z + axle.dz));
+  });
+});
+
 describe("sweepCollisions has no face-on blind spot", () => {
   it("flags a post under the middle of the platform (no rotating corner lands in it)", () => {
     const p = planAsymmetric96();
