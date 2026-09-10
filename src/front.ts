@@ -197,7 +197,7 @@ function mainGrid(): void {
     [
       "# Cut list — saw grid (layout: " + layout + ", saw vs CNC vs mill)",
       "",
-      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}.`,
+      `> Params: S ${both(g.S)}, H ${both(g.H)}, panelT ${both(g.panelT)}; saw base ${both(plan.sawBaseW)} x ${both(plan.sawBaseD)}, base->table ${both(plan.sawBaseToTable)}; planer bed ${both(bedOf("planer"))}; jointer bed ${both(bedOf("jointer"))}; drum pad ${both(g.drumPad ?? 25)}.`,
       "",
       "## Workflow rules (load-bearing)",
       "",
