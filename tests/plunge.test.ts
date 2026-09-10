@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { parse, trackMoves } from "../src/parser.ts";
 import { retunePlunges } from "../src/plunge.ts";
 import { getProfile } from "../src/materials.ts";
-import { corpusFile } from "./corpus.ts";
+import { corpusFile, corpusSkip } from "./corpus.ts";
 
 const WALNUT = getProfile("walnut");
 const LOCUST = getProfile("locust");
@@ -71,7 +71,7 @@ M05
     assert.ok(g83[1].misc.some((w) => w === "Q0.5"));
   });
 
-  it("shark 3D finish: zero feed changes on cutting moves", () => {
+  it("shark 3D finish: zero feed changes on cutting moves", corpusSkip, () => {
     const txt = readFileSync(
       corpusFile("shark-bottom-finish-fine.c2d.nc"),
       "utf8",

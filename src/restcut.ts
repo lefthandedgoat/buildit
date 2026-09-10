@@ -398,7 +398,9 @@ export function applyRestCut(
         motion: 1,
         explicitMotion: true,
         coords: {},
-        explicitFeed: true,
+        // Restore the feed only when we have one: an explicit F0 is
+        // rejected by grbl, and a 0 feed means the parent op never set F.
+        explicitFeed: parentFeed > 0,
         feed: parentFeed,
         misc: [],
       });

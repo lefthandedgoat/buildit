@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parse } from "../src/parser.ts";
 import { extractLoops, analyzeRest, loopRest } from "../src/rest2d.ts";
-import { corpusFile } from "./corpus.ts";
+import { corpusFile, corpusSkip } from "./corpus.ts";
 
 const SQUARE = `G90
 G21
@@ -83,11 +83,8 @@ G0Z5
     assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`);
   });
 
-  it("happy pocket file: loops found, analysis runs clean", () => {
-    const txt = readFileSync(
-      corpusFile("happy-w-half-mil.c2d.nc"),
-      "utf8",
-    );
+  it("happy pocket file: loops found, analysis runs clean", corpusSkip, () => {
+    const txt = readFileSync(corpusFile("happy-w-half-mil.c2d.nc"), "utf8");
     const r = analyzeRest(parse(txt).blocks, 3.175, 1.0);
     assert.ok(r.loopsFound > 0, "expected pocket loops");
     assert.ok(r.totalRestArea >= 0);

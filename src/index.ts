@@ -10,9 +10,8 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { parse } from "./parser.ts";
-import { janitor } from "./janitor.ts";
+import { janitor, emit } from "./janitor.ts";
 import { fitArcs } from "./arcs.ts";
-import { emit } from "./janitor.ts";
 import { estimate } from "./estimate.ts";
 import { optimizeRapids } from "./rapids.ts";
 import { retunePlunges } from "./plunge.ts";
@@ -21,12 +20,27 @@ import { analyzeRest } from "./rest2d.ts";
 import { maybeApplyRestCut } from "./restcut.ts";
 import { auditBlocks } from "./check.ts";
 import { getMachine, machineNames, resolveRates } from "./machines.ts";
+import { stockTopOf } from "./deviation.ts";
 
 function usage(): never {
   console.error(
     "Usage: buildit <input.nc> [-o output.nc] [--machine NAME] [--accel 400] [--rapid 5000] [--junction-deviation MM] [--tolerance 0.01] [--decimals 3] [--arcs|--no-arcs] [--arc-tol 0.02] [--tsp|--no-tsp] [--clearance auto|MM] [--material walnut|locust] [--peck-profile NAME] [--no-plunge] [--rest-2d PREV_D] [--rest-finish D] [--rest-cut --finish-tool D] [--check D [--check-prev P]]",
   );
   process.exit(2);
+}
+
+function fail(msg: string): never {
+  console.error(msg);
+  usage();
+}
+
+function readInput(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (e) {
+    console.error(`cannot read input "${path}": ${(e as Error).message}`);
+    process.exit(2);
+  }
 }
 
 function arg(flag: string, def: string | null): string | null {
@@ -109,16 +123,36 @@ if (useRestCut && (restPrev === null || finishTool === null)) {
 if (
   ![accel, rapid, tolerance, decimals, arcTol, restFinish, jd].every(
     Number.isFinite,
-  ) ||
-  (restPrev !== null && !Number.isFinite(restPrev)) ||
-  (checkTool !== null && !Number.isFinite(checkTool)) ||
-  (checkPrev !== null && !Number.isFinite(checkPrev)) ||
-  (clearance !== "auto" && !Number.isFinite(clearance))
+  )
 )
   usage();
+// Range validation: the CLI promises exit 2 on bad input, but these used
+// to slip through and produce 0-minute estimates, an uncaught toFixed
+// RangeError, or (worst) retracts below the cut via a negative plane.
+if (accel <= 0) fail(`--accel must be > 0 (got ${accel})`);
+if (rapid <= 0) fail(`--rapid must be > 0 (got ${rapid})`);
+if (tolerance < 0) fail(`--tolerance must be >= 0 (got ${tolerance})`);
+if (arcTol < 0) fail(`--arc-tol must be >= 0 (got ${arcTol})`);
+if (!Number.isInteger(decimals) || decimals < 0 || decimals > 100)
+  fail(`--decimals must be an integer 0..100 (got ${decimals})`);
+if (restFinish <= 0) fail(`--rest-finish must be > 0 (got ${restFinish})`);
+if (restPrev !== null && (!Number.isFinite(restPrev) || restPrev <= 0))
+  fail(`--rest-2d must be > 0 (got ${restPrevRaw})`);
+if (finishTool !== null && (!Number.isFinite(finishTool) || finishTool <= 0))
+  fail(`--finish-tool must be > 0 (got ${finishToolRaw})`);
+if (checkTool !== null && (!Number.isFinite(checkTool) || checkTool <= 0))
+  fail(`--check must be > 0 (got ${checkRaw})`);
+if (checkPrev !== null && (!Number.isFinite(checkPrev) || checkPrev <= 0))
+  fail(`--check-prev must be > 0 (got ${checkPrevRaw})`);
+if (clearance !== "auto" && (!Number.isFinite(clearance) || clearance <= 0))
+  fail(`--clearance must be "auto" or > 0 (got ${clearanceRaw})`);
 
-const text = readFileSync(input, "utf8");
+const text = readInput(input);
 const prog = parse(text);
+if (/\bG91\b/i.test(text))
+  console.error(
+    "warning: G91 (incremental) present; positions are tracked as absolute",
+  );
 const before = estimate(prog, {
   accel,
   rapidRate: rapid,
@@ -153,15 +187,6 @@ if (useRestCut) {
   restCutRegions = rc.regionsCut;
   restCutBlocks = rc.restBlocks.filter((b) => !b.passthrough).length;
   restCutSec = rc.addedSec;
-}
-
-function stockTopOf(prog: { blocks: import("./parser.ts").Block[] }): number {
-  let top = -Infinity;
-  for (const b of prog.blocks) {
-    if (b.motion === 1 && b.coords.Z !== undefined)
-      top = Math.max(top, b.coords.Z);
-  }
-  return Number.isFinite(top) ? top : 0;
 }
 
 // v2 arcs (optional).
@@ -221,7 +246,14 @@ const after = estimate(afterProg, {
   junctionDeviation: jd,
 });
 
-if (output) writeFileSync(output, outText);
+if (output) {
+  try {
+    writeFileSync(output, outText);
+  } catch (e) {
+    console.error(`cannot write output "${output}": ${(e as Error).message}`);
+    process.exit(2);
+  }
+}
 
 const row = (k: string, a: string, b: string) =>
   `${k.padEnd(22)} ${a.padStart(14)} ${b.padStart(14)}`;

@@ -592,7 +592,11 @@
       aPts.push(b.from, b.to);
     }
     const nearA = (x, y, r) => {
-      for (let i = 0; i < aPts.length; i += 3) {
+      // aPts holds BOTH endpoints per block (2 entries/block), so every
+      // entry must be sampled: i += 3 sampled ~1/3 and i += 2 sampled only
+      // the from-points, both of which can miss the near endpoint and tag
+      // original geometry as added rest (false-green risk).
+      for (let i = 0; i < aPts.length; i++) {
         const dx = x - aPts[i][0],
           dy = y - aPts[i][1];
         if (dx * dx + dy * dy < r * r) return true;

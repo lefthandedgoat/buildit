@@ -332,6 +332,16 @@
             alert("parse failed: " + e.message);
             return;
           }
+          // tagAddedPlunges needs BOTH files: rest retracts rewritten to
+          // file clearance have no elevated signature, and rapids-rewritten
+          // passes must be excluded from the verdict. Re-sample after
+          // tagging so the verdict sees the retagged kinds (the tests call
+          // this too; without it the UI diverges from the tested behavior).
+          if (state.A && state.B) {
+            T.tagAddedPlunges(state.A.blocks, state.B.blocks);
+            state.A.samp = T.samplePath(state.A.blocks, 0.15, 60000);
+            state.B.samp = T.samplePath(state.B.blocks, 0.15, 60000);
+          }
           refresh();
         };
         r.readAsText(f);

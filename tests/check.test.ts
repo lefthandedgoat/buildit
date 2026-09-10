@@ -6,7 +6,7 @@ import { janitor } from "../src/janitor.ts";
 import { auditBlocks, cornerResidue } from "../src/check.ts";
 import { cornerGeoms, extractLoops } from "../src/rest2d.ts";
 
-import { CORPUS } from "./corpus.ts";
+import { CORPUS, corpusSkip } from "./corpus.ts";
 
 // 10x1 slot pocket at z=-1: opposite walls 1.0 apart.
 const SLOT1 = `G90
@@ -168,26 +168,30 @@ describe("check: waist readout (report-only, never graded)", () => {
     assert.ok(r.clean);
   });
 
-  it("collapses happy-w-1-16 fold flags toward the genuine waists", () => {
-    const prog = parse(readFileSync(`${CORPUS}/happy-w-1-16.c2d.nc`, "utf8"));
-    const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
-    const r = auditBlocks(parse(jt).blocks, {
-      toolDiameter: 1.5875,
-      prevDiameter: 3.175,
-    });
-    // Legacy readout still buries the file in i/i+2 fold flags.
-    assert.equal(r.channels.length, 40);
-    // Separation readout collapses toward the ~8 genuine waist loops.
-    assert.ok(
-      r.waists.length >= 6 && r.waists.length <= 10,
-      `waists ${r.waists.length}`,
-    );
-    assert.ok(r.waists.length < r.channels.length / 2);
-    for (const w of r.waists) {
-      assert.ok(w.width < 1.5875, `width ${w.width}`);
-      assert.ok(w.runMM >= 1.5875, `run ${w.runMM}`);
-    }
-  });
+  it(
+    "collapses happy-w-1-16 fold flags toward the genuine waists",
+    corpusSkip,
+    () => {
+      const prog = parse(readFileSync(`${CORPUS}/happy-w-1-16.c2d.nc`, "utf8"));
+      const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
+      const r = auditBlocks(parse(jt).blocks, {
+        toolDiameter: 1.5875,
+        prevDiameter: 3.175,
+      });
+      // Legacy readout still buries the file in i/i+2 fold flags.
+      assert.equal(r.channels.length, 40);
+      // Separation readout collapses toward the ~8 genuine waist loops.
+      assert.ok(
+        r.waists.length >= 6 && r.waists.length <= 10,
+        `waists ${r.waists.length}`,
+      );
+      assert.ok(r.waists.length < r.channels.length / 2);
+      for (const w of r.waists) {
+        assert.ok(w.width < 1.5875, `width ${w.width}`);
+        assert.ok(w.runMM >= 1.5875, `run ${w.runMM}`);
+      }
+    },
+  );
 });
 
 // Boss (island) fixture: 12x12 CCW pocket with a centered 6x6 CW boss.
@@ -249,65 +253,83 @@ describe("check: island candidates (report-only, never graded)", () => {
     assert.equal(r.islands.length, 0);
   });
 
-  it("finds no islands on shark-top-clear (same-winding stepovers)", () => {
-    const prog = parse(
-      readFileSync(`${CORPUS}/shark-top-clear.c2d.nc`, "utf8"),
-    );
-    const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
-    const r = auditBlocks(parse(jt).blocks, {
-      toolDiameter: 1.5875,
-      prevDiameter: 3.175,
-    });
-    assert.equal(r.islands.length, 0);
-    assert.equal(r.channels.length, 10);
-  });
-
-  it("reports island candidates with gated moats on happy-w-half-mil", () => {
-    const prog = parse(
-      readFileSync(`${CORPUS}/happy-w-half-mil.c2d.nc`, "utf8"),
-    );
-    const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
-    const r = auditBlocks(parse(jt).blocks, {
-      toolDiameter: 1.5875,
-      prevDiameter: 3.175,
-    });
-    assert.ok(r.islands.length > 0, "expected island candidates");
-    for (const isl of r.islands) {
-      assert.ok(isl.moat < 1.5875, `moat ${isl.moat}`);
-      assert.ok(isl.compactness >= 0.5, `compact ${isl.compactness}`);
-    }
-  });
-});
-
-describe("check: existing verdicts unchanged (report-only guard)", () => {
-  it("locks graded flag counts on the three spot-check files", () => {
-    const cases = [
-      { file: "shark-top-clear.c2d.nc", loops: 10, ch: 10, tiny: 0, corn: 77 },
-      { file: "happy-w-1-16.c2d.nc", loops: 40, ch: 40, tiny: 0, corn: 44 },
-      {
-        file: "happy-w-half-mil.c2d.nc",
-        loops: 300,
-        ch: 300,
-        tiny: 0,
-        corn: 451,
-      },
-    ] as const;
-    for (const c of cases) {
-      const prog = parse(readFileSync(`${CORPUS}/${c.file}`, "utf8"));
+  it(
+    "finds no islands on shark-top-clear (same-winding stepovers)",
+    corpusSkip,
+    () => {
+      const prog = parse(
+        readFileSync(`${CORPUS}/shark-top-clear.c2d.nc`, "utf8"),
+      );
       const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
       const r = auditBlocks(parse(jt).blocks, {
         toolDiameter: 1.5875,
         prevDiameter: 3.175,
       });
-      assert.equal(r.loopsFound, c.loops, c.file);
-      assert.equal(r.channels.length, c.ch, c.file);
-      assert.equal(r.tinyArcs.length, c.tiny, c.file);
-      assert.equal(r.corners.length, c.corn, c.file);
-      assert.equal(r.clean, false, c.file);
-    }
-  });
+      assert.equal(r.islands.length, 0);
+      assert.equal(r.channels.length, 10);
+    },
+  );
+
+  it(
+    "reports island candidates with gated moats on happy-w-half-mil",
+    corpusSkip,
+    () => {
+      const prog = parse(
+        readFileSync(`${CORPUS}/happy-w-half-mil.c2d.nc`, "utf8"),
+      );
+      const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
+      const r = auditBlocks(parse(jt).blocks, {
+        toolDiameter: 1.5875,
+        prevDiameter: 3.175,
+      });
+      assert.ok(r.islands.length > 0, "expected island candidates");
+      for (const isl of r.islands) {
+        assert.ok(isl.moat < 1.5875, `moat ${isl.moat}`);
+        assert.ok(isl.compactness >= 0.5, `compact ${isl.compactness}`);
+      }
+    },
+  );
 });
-describe("check: corpus", () => {
+
+describe(
+  "check: existing verdicts unchanged (report-only guard)",
+  corpusSkip,
+  () => {
+    it("locks graded flag counts on the three spot-check files", () => {
+      const cases = [
+        {
+          file: "shark-top-clear.c2d.nc",
+          loops: 10,
+          ch: 10,
+          tiny: 0,
+          corn: 77,
+        },
+        { file: "happy-w-1-16.c2d.nc", loops: 40, ch: 40, tiny: 0, corn: 44 },
+        {
+          file: "happy-w-half-mil.c2d.nc",
+          loops: 300,
+          ch: 300,
+          tiny: 0,
+          corn: 451,
+        },
+      ] as const;
+      for (const c of cases) {
+        const prog = parse(readFileSync(`${CORPUS}/${c.file}`, "utf8"));
+        const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });
+        const r = auditBlocks(parse(jt).blocks, {
+          toolDiameter: 1.5875,
+          prevDiameter: 3.175,
+        });
+        assert.equal(r.loopsFound, c.loops, c.file);
+        assert.equal(r.channels.length, c.ch, c.file);
+        assert.equal(r.tinyArcs.length, c.tiny, c.file);
+        assert.equal(r.corners.length, c.corn, c.file);
+        assert.equal(r.clean, false, c.file);
+      }
+    });
+  },
+);
+describe("check: corpus", corpusSkip, () => {
   it("runs clean-structured on happy-w-1-16 with 1/16 + 1/8 prev", () => {
     const prog = parse(readFileSync(`${CORPUS}/happy-w-1-16.c2d.nc`, "utf8"));
     const { text: jt } = janitor(prog, { tolerance: 0.01, decimals: 3 });

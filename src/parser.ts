@@ -42,7 +42,7 @@ export interface Program {
   blocks: Block[];
 }
 
-const WORD = /([A-Z])(-?\d*\.?\d+)/g;
+const WORD = /([A-Za-z])(-?\d*\.?\d+)/g;
 
 function stripComments(line: string): { code: string; comment: string } {
   // Semicolon comment runs to end of line; paren comments may be inline.
@@ -88,7 +88,10 @@ export function parse(text: string): Program {
     const coords: Coords = {};
     const misc: string[] = [];
     for (const m of code.matchAll(WORD)) {
-      const letter = m[1];
+      // Case-insensitive: lowercase g-code letters (g1, x1.5) are valid on
+      // grbl senders, so normalize only for dispatch; misc keeps the
+      // original spelling via m[0].
+      const letter = m[1].toUpperCase();
       const value = parseFloat(m[2]);
       if (
         letter === "G" &&

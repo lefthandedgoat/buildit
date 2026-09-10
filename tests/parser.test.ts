@@ -1,23 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse, trackMoves } from "../src/parser.ts";
 
-import { CORPUS } from "./corpus.ts";
-
-function corpusFiles(): string[] {
-  const out: string[] = [];
-  const walk = (d: string) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith(".nc")) out.push(p);
-    }
-  };
-  walk(CORPUS);
-  return out.sort();
-}
+import { CORPUS, corpusSkip, listCorpusFiles } from "./corpus.ts";
 
 describe("modal-G1 regression (the 48k-counted-as-4 bug)", () => {
   it("resolves modal motion on continuation lines", () => {
@@ -58,7 +45,7 @@ describe("modal-G1 regression (the 48k-counted-as-4 bug)", () => {
 });
 
 describe("corpus parsing", () => {
-  for (const f of corpusFiles()) {
+  for (const f of listCorpusFiles()) {
     it(`parses ${f} with motion blocks`, () => {
       const prog = parse(readFileSync(f, "utf8"));
       const moves = trackMoves(prog);
@@ -66,7 +53,7 @@ describe("corpus parsing", () => {
     });
   }
 
-  it("counts 48,007 G1 segs in the shark fine-finish file", () => {
+  it("counts 48,007 G1 segs in the shark fine-finish file", corpusSkip, () => {
     const prog = parse(
       readFileSync(join(CORPUS, "shark-bottom-finish-fine.c2d.nc"), "utf8"),
     );

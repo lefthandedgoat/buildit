@@ -1,28 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { parse, trackMoves } from "../src/parser.ts";
 import { janitor } from "../src/janitor.ts";
 
-import { CORPUS } from "./corpus.ts";
+import { listCorpusFiles } from "./corpus.ts";
 const EPS = 0.01;
 
-function corpusFiles(): string[] {
-  const out: string[] = [];
-  const walk = (d: string) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith(".nc")) out.push(p);
-    }
-  };
-  walk(CORPUS);
-  return out.sort();
-}
-
 describe("janitor fidelity (every corpus file)", () => {
-  for (const f of corpusFiles()) {
+  for (const f of listCorpusFiles()) {
     it(`round-trips ${f} within tolerance`, () => {
       const orig = parse(readFileSync(f, "utf8"));
       const { text } = janitor(orig, { tolerance: EPS, decimals: 3 });

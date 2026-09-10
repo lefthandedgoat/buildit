@@ -12,7 +12,7 @@ import {
 import { analyzeRest } from "../src/rest2d.ts";
 import { trackMoves } from "../src/parser.ts";
 
-import { CORPUS } from "./corpus.ts";
+import { CORPUS, CORPUS_AVAILABLE, corpusSkip } from "./corpus.ts";
 const SHARP = `${CORPUS}/happy-w-1-16.c2d.nc`; // sharp concave corners
 const FACETED = `${CORPUS}/happy-w-half-mil.c2d.nc`; // faceted micro-corners
 
@@ -42,7 +42,7 @@ function stockTop(blocks: ReturnType<typeof janitorBlocks>): number {
   return Number.isFinite(top) ? top : 0;
 }
 
-const sharpBlocks = janitorBlocks(SHARP);
+const sharpBlocks = CORPUS_AVAILABLE ? janitorBlocks(SHARP) : parse(ELL).blocks; // synthetic fallback keeps non-corpus tests runnable
 const sharpClear = stockTop(sharpBlocks) + 1.0;
 const OPTS: RestCutOptions = {
   prevDiameter: 3.175,
@@ -122,108 +122,112 @@ describe("restcut v4", () => {
     }
   });
 
-  it("(c) entry/exit via clearance: proven file height, not stockTop+1", () => {
-    // v4.2: rest reuses the file's proven traverse height (4.0) instead
-    // of the blind stockTop+1 plane (5.027 — the stockTop is a G1
-    // air-ramp endpoint, not material). Re-derive the expectation here:
-    // min(auto, lowest G0-XY-traverse >= maxLoopZ+0.5).
-    let maxLoopZ = -Infinity;
-    for (const r of res.regions) maxLoopZ = Math.max(maxLoopZ, r.loopZ);
-    let proven = Infinity;
-    for (const m of trackMoves({ blocks: sharpBlocks })) {
-      if (m.block.motion !== 0 || m.dist <= 1e-9) continue;
-      if (Math.hypot(m.to[0] - m.from[0], m.to[1] - m.from[1]) <= 1e-9)
-        continue;
-      if (m.to[2] >= maxLoopZ + 0.5) proven = Math.min(proven, m.to[2]);
-    }
-    const C = Math.min(sharpClear, proven);
-    assert.equal(C, 4.0);
-    assert.ok(C < sharpClear, "reuse must fire on this corpus");
-    const zs = new Set(res.regions.map((r) => r.loopZ));
-    // Split into cycles at wrapper comments.
-    const cycles: (typeof res.restBlocks)[] = [];
-    let cur: typeof res.restBlocks = [];
-    for (const b of res.restBlocks) {
-      if (b.passthrough && b.raw.includes("BUILDIT REST")) {
-        if (cur.length > 0) cycles.push(cur);
-        cur = [];
-      } else {
-        cur.push(b);
+  it(
+    "(c) entry/exit via clearance: proven file height, not stockTop+1",
+    corpusSkip,
+    () => {
+      // v4.2: rest reuses the file's proven traverse height (4.0) instead
+      // of the blind stockTop+1 plane (5.027 — the stockTop is a G1
+      // air-ramp endpoint, not material). Re-derive the expectation here:
+      // min(auto, lowest G0-XY-traverse >= maxLoopZ+0.5).
+      let maxLoopZ = -Infinity;
+      for (const r of res.regions) maxLoopZ = Math.max(maxLoopZ, r.loopZ);
+      let proven = Infinity;
+      for (const m of trackMoves({ blocks: sharpBlocks })) {
+        if (m.block.motion !== 0 || m.dist <= 1e-9) continue;
+        if (Math.hypot(m.to[0] - m.from[0], m.to[1] - m.from[1]) <= 1e-9)
+          continue;
+        if (m.to[2] >= maxLoopZ + 0.5) proven = Math.min(proven, m.to[2]);
       }
-    }
-    if (cur.length > 0) cycles.push(cur);
-    assert.ok(cycles.length > 0);
-    for (const cyc of cycles) {
-      // Trailing modal-restore: coord-less explicit block.
-      const last = cyc[cyc.length - 1];
-      assert.equal(Object.keys(last.coords).length, 0);
-      const body = cyc.slice(0, -1);
-      let z = NaN;
-      let i = 0;
-      let sawCut = false;
-      while (i < body.length) {
-        // Reposition tail (per-loop, after all plunge cycles): G0 XY.
-        if (sawCut && body[i].motion === 0 && body[i].coords.X !== undefined)
-          break;
-        // G0 Z clearance
-        assert.equal(body[i].motion, 0);
-        assert.ok(body[i].coords.Z !== undefined);
-        z = body[i].coords.Z as number;
-        assert.ok(Math.abs(z - C) < 1e-9, `retract not at clearance: ${z}`);
-        i++;
-        // G0 XY at clearance
-        assert.equal(body[i].motion, 0);
-        assert.ok(body[i].coords.X !== undefined);
-        assert.ok(Math.abs(z - C) < 1e-9);
-        i++;
-        // G1 Z-only plunge to a loop depth
-        assert.equal(body[i].motion, 1);
-        assert.equal(body[i].coords.X, undefined);
-        assert.equal(body[i].coords.Y, undefined);
-        z = body[i].coords.Z as number;
-        assert.ok(zs.has(z), `plunge to non-parent depth ${z}`);
-        i++;
-        // G1 XY cuts at depth
-        let n = 0;
-        while (
-          i < body.length &&
-          body[i].motion === 1 &&
-          body[i].coords.X !== undefined
-        ) {
-          n++;
-          sawCut = true;
+      const C = Math.min(sharpClear, proven);
+      assert.equal(C, 4.0);
+      assert.ok(C < sharpClear, "reuse must fire on this corpus");
+      const zs = new Set(res.regions.map((r) => r.loopZ));
+      // Split into cycles at wrapper comments.
+      const cycles: (typeof res.restBlocks)[] = [];
+      let cur: typeof res.restBlocks = [];
+      for (const b of res.restBlocks) {
+        if (b.passthrough && b.raw.includes("BUILDIT REST")) {
+          if (cur.length > 0) cycles.push(cur);
+          cur = [];
+        } else {
+          cur.push(b);
+        }
+      }
+      if (cur.length > 0) cycles.push(cur);
+      assert.ok(cycles.length > 0);
+      for (const cyc of cycles) {
+        // Trailing modal-restore: coord-less explicit block.
+        const last = cyc[cyc.length - 1];
+        assert.equal(Object.keys(last.coords).length, 0);
+        const body = cyc.slice(0, -1);
+        let z = NaN;
+        let i = 0;
+        let sawCut = false;
+        while (i < body.length) {
+          // Reposition tail (per-loop, after all plunge cycles): G0 XY.
+          if (sawCut && body[i].motion === 0 && body[i].coords.X !== undefined)
+            break;
+          // G0 Z clearance
+          assert.equal(body[i].motion, 0);
+          assert.ok(body[i].coords.Z !== undefined);
+          z = body[i].coords.Z as number;
+          assert.ok(Math.abs(z - C) < 1e-9, `retract not at clearance: ${z}`);
+          i++;
+          // G0 XY at clearance
+          assert.equal(body[i].motion, 0);
+          assert.ok(body[i].coords.X !== undefined);
+          assert.ok(Math.abs(z - C) < 1e-9);
+          i++;
+          // G1 Z-only plunge to a loop depth
+          assert.equal(body[i].motion, 1);
+          assert.equal(body[i].coords.X, undefined);
+          assert.equal(body[i].coords.Y, undefined);
+          z = body[i].coords.Z as number;
+          assert.ok(zs.has(z), `plunge to non-parent depth ${z}`);
+          i++;
+          // G1 XY cuts at depth
+          let n = 0;
+          while (
+            i < body.length &&
+            body[i].motion === 1 &&
+            body[i].coords.X !== undefined
+          ) {
+            n++;
+            sawCut = true;
+            i++;
+          }
+          assert.ok(n >= 1, "plunge with no cut moves");
+          // G0 Z retract
+          assert.equal(body[i].motion, 0);
+          z = body[i].coords.Z as number;
+          assert.ok(Math.abs(z - C) < 1e-9);
           i++;
         }
-        assert.ok(n >= 1, "plunge with no cut moves");
-        // G0 Z retract
-        assert.equal(body[i].motion, 0);
-        z = body[i].coords.Z as number;
-        assert.ok(Math.abs(z - C) < 1e-9);
-        i++;
+        assert.ok(sawCut);
+        // Optional position restore: G0 XY at clearance (+ G1 Z-only back
+        // to loop-end depth), returning to the exact insertion position.
+        if (
+          i < body.length &&
+          body[i].motion === 0 &&
+          body[i].coords.X !== undefined
+        ) {
+          i++;
+        }
+        if (
+          i < body.length &&
+          body[i].motion === 1 &&
+          body[i].coords.X === undefined &&
+          body[i].coords.Y === undefined
+        ) {
+          i++;
+        }
+        // Trailing modal-restore already verified above via `last`;
+        // body must be fully consumed (restore was sliced off).
+        assert.equal(i, body.length);
       }
-      assert.ok(sawCut);
-      // Optional position restore: G0 XY at clearance (+ G1 Z-only back
-      // to loop-end depth), returning to the exact insertion position.
-      if (
-        i < body.length &&
-        body[i].motion === 0 &&
-        body[i].coords.X !== undefined
-      ) {
-        i++;
-      }
-      if (
-        i < body.length &&
-        body[i].motion === 1 &&
-        body[i].coords.X === undefined &&
-        body[i].coords.Y === undefined
-      ) {
-        i++;
-      }
-      // Trailing modal-restore already verified above via `last`;
-      // body must be fully consumed (restore was sliced off).
-      assert.equal(i, body.length);
-    }
-  });
+    },
+  );
 
   it("(f) explicit-high user clearance is preserved, not thriftily lowered", () => {
     // --clearance 99 means tall clamps: user intent wins over reuse.
@@ -371,25 +375,29 @@ G0Z-0.9
     }
   });
 
-  it("faceted micro-corners: rest exists but correctly declined (no overcut)", () => {
-    const fb = janitorBlocks(FACETED);
-    const a = analyzeRest(fb, 3.175, 1.0);
-    assert.ok(a.totalRestArea > 0.1, "rest must exist for this verdict");
-    const r = applyRestCut(fb, {
-      prevDiameter: 3.175,
-      finishDiameter: 1.0,
-      plungeFeed: 350,
-      clearance: stockTop(fb) + 1.0,
-      rapidRate: 5000,
-      accel: 400,
-    });
-    assert.equal(
-      r.regionsCut,
-      0,
-      "faceted micro-rest is uncontainable: must decline, not overcut",
-    );
-    assert.equal(r.restBlocks.length, 0);
-  });
+  it(
+    "faceted micro-corners: rest exists but correctly declined (no overcut)",
+    corpusSkip,
+    () => {
+      const fb = janitorBlocks(FACETED);
+      const a = analyzeRest(fb, 3.175, 1.0);
+      assert.ok(a.totalRestArea > 0.1, "rest must exist for this verdict");
+      const r = applyRestCut(fb, {
+        prevDiameter: 3.175,
+        finishDiameter: 1.0,
+        plungeFeed: 350,
+        clearance: stockTop(fb) + 1.0,
+        rapidRate: 5000,
+        accel: 400,
+      });
+      assert.equal(
+        r.regionsCut,
+        0,
+        "faceted micro-rest is uncontainable: must decline, not overcut",
+      );
+      assert.equal(r.restBlocks.length, 0);
+    },
+  );
 });
 
 describe("rest span end markers (v4.1)", () => {

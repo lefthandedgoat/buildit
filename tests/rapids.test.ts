@@ -5,7 +5,7 @@ import { parse, trackMoves } from "../src/parser.ts";
 import { optimizeRapids } from "../src/rapids.ts";
 import { emit } from "../src/janitor.ts";
 
-import { CORPUS } from "./corpus.ts";
+import { CORPUS, corpusSkip } from "./corpus.ts";
 const OPTS = {
   tsp: true,
   clearance: "auto" as const,
@@ -74,13 +74,56 @@ describe("rapids TSP reorder", () => {
     assert.equal(stats.sitesReordered, 0);
   });
 
-  it("leaves the continuous 3D finish alone (shark file gate)", () => {
-    const txt = readFileSync(
-      `${CORPUS}/shark-bottom-finish-fine.c2d.nc`,
-      "utf8",
-    );
-    const { stats } = optimizeRapids(parse(txt).blocks, OPTS);
-    assert.equal(stats.sitesReordered, 0);
+  it(
+    "leaves the continuous 3D finish alone (shark file gate)",
+    corpusSkip,
+    () => {
+      const txt = readFileSync(
+        `${CORPUS}/shark-bottom-finish-fine.c2d.nc`,
+        "utf8",
+      );
+      const { stats } = optimizeRapids(parse(txt).blocks, OPTS);
+      assert.equal(stats.sitesReordered, 0);
+    },
+  );
+
+  it("reorder never changes a resolved modal feed (F inheritance)", () => {
+    // Two sites inherit their feed from a third site's explicit F. Once
+    // the feeding site is reordered AFTER its inheritors, emit(minimal)
+    // (which only re-emits explicit F words) used to give the inheritors
+    // the wrong feed — an unsafe speedup. Falsifying: fails with the
+    // materialize-first-cut fix reverted.
+    const nc = `G90
+G21
+G0X5Y0Z5
+G1Z-1F300
+G1X6
+G0Z5
+G0X500Y0Z5
+G1Z-1F200
+G1X501
+G0Z5
+G0X100Y0Z5
+G1Z-1
+G1X101
+G0Z5
+G0X1000Y0Z5
+G1Z-1F400
+G1X1001
+G0Z5
+M30
+`;
+    const feeds = (t: string): number[] =>
+      parse(t)
+        .blocks.filter((b) => b.motion === 1)
+        .map((b) => b.feed);
+    const prog = parse(nc);
+    const { blocks, stats } = optimizeRapids(prog.blocks, {
+      ...OPTS,
+      clearance: 20,
+    });
+    assert.ok(stats.sitesReordered >= 2, "repro needs a real reorder");
+    assert.deepEqual(feeds(emit({ blocks }, 3, true)), feeds(nc));
   });
 });
 
@@ -158,7 +201,7 @@ M05
     );
   });
 
-  it("corpus: output introduces no novel low rapids", () => {
+  it("corpus: output introduces no novel low rapids", corpusSkip, () => {
     for (const f of ["shark-holes.c2d.nc", "happy-w-half-mil.c2d.nc"]) {
       const txt = readFileSync(`${CORPUS}/${f}`, "utf8");
       const prog = parse(txt);

@@ -40,45 +40,90 @@ const core = require("../viewer/core.cjs") as {
   ): { key: string; label: string };
 };
 
-import { CORPUS } from "./corpus.ts";
+import { CORPUS, corpusSkip } from "./corpus.ts";
+import { parse } from "../src/parser.ts";
+import { janitor, emit } from "../src/janitor.ts";
+import { fitArcs } from "../src/arcs.ts";
+import { optimizeRapids } from "../src/rapids.ts";
+import { retunePlunges } from "../src/plunge.ts";
+import { getProfile } from "../src/materials.ts";
 
-function loadPair(before: string, after: string) {
-  const a = core.parseNC(readFileSync(join(CORPUS, before), "utf8"));
-  const b = core.parseNC(
-    readFileSync(
-      after.startsWith("/tmp") ? after : join(CORPUS, after),
-      "utf8",
-    ),
-  );
+/**
+ * Run the default optimizer pipeline in-process (same defaults as
+ * index.ts: janitor -> arcs -> rapids -> plunge). Replaces the old
+ * pre-generated /tmp/*.nc artifacts, which were never regenerated and so
+ * validated a stale build rather than current output.
+ */
+function optimizeForViewer(text: string): string {
+  const { text: jText } = janitor(parse(text), {
+    tolerance: 0.01,
+    decimals: 3,
+  });
+  let stage = parse(jText);
+  stage = { blocks: fitArcs(stage.blocks, { tolerance: 0.02 }).blocks };
+  stage = parse(emit(stage, 3, true));
+  stage = {
+    blocks: optimizeRapids(stage.blocks, {
+      tsp: true,
+      clearance: "auto",
+      margin: 1.0,
+      rapidRate: 5000,
+      accel: 400,
+    }).blocks,
+  };
+  stage = parse(emit(stage, 3, true));
+  stage = {
+    blocks: retunePlunges(stage.blocks, getProfile("walnut")).blocks,
+  };
+  return emit(stage, 3, true);
+}
+
+function loadPairText(beforeText: string, afterText: string) {
+  const a = core.parseNC(beforeText);
+  const b = core.parseNC(afterText);
   core.tagAddedPlunges(a, b);
   const tz = core.stockTop(a);
   // Verdict sampling is UNCAPPED (every endpoint + break retained); only
   // drawing decimates. Capping verdict samples can hide moves (false green).
-  const d = core.deviation(
+  return core.deviation(
     core.samplePath(a, 0.08, Infinity).pts,
     core.samplePath(b, 0.08, Infinity).pts,
     tz,
   );
-  return d;
+}
+
+function loadPair(before: string, after: string) {
+  return loadPairText(
+    readFileSync(join(CORPUS, before), "utf8"),
+    readFileSync(join(CORPUS, after), "utf8"),
+  );
 }
 
 describe("viewer verdicts on shipped pairs", () => {
-  it("top-clear preserves geometry within 0.25mm", () => {
+  it("top-clear preserves geometry within 0.25mm", corpusSkip, () => {
     const d = loadPair("shark-top-clear.c2d.nc", "shark-top-clear-buildit.nc");
     assert.ok(d.maxA <= 0.25, `preserve ${d.maxA}`);
   });
 
-  it("bottom-finish preserves geometry within 0.25mm", () => {
-    const d = loadPair("shark-bottom-finish-fine.c2d.nc", "/tmp/shark-opt.nc");
+  it("bottom-finish preserves geometry within 0.25mm", corpusSkip, () => {
+    const before = readFileSync(
+      join(CORPUS, "shark-bottom-finish-fine.c2d.nc"),
+      "utf8",
+    );
+    const d = loadPairText(before, optimizeForViewer(before));
     assert.ok(d.maxA <= 0.25, `preserve ${d.maxA}`);
   });
 
-  it("happy-half preserves geometry within 0.5mm", () => {
-    const d = loadPair("happy-w-half-mil.c2d.nc", "/tmp/happy-opt.nc");
+  it("happy-half preserves geometry within 0.5mm", corpusSkip, () => {
+    const before = readFileSync(
+      join(CORPUS, "happy-w-half-mil.c2d.nc"),
+      "utf8",
+    );
+    const d = loadPairText(before, optimizeForViewer(before));
     assert.ok(d.maxA <= 0.5, `preserve ${d.maxA}`);
   });
 
-  it("identical inputs deviate exactly zero", () => {
+  it("identical inputs deviate exactly zero", corpusSkip, () => {
     const text = readFileSync(join(CORPUS, "shark-top-clear.c2d.nc"), "utf8");
     const a = core.parseNC(text);
     const b = core.parseNC(text);
@@ -195,46 +240,84 @@ describe("viewer verdicts on shipped pairs", () => {
     assert.equal(an.worst, -38);
   });
 
-  it("shipped rest pair: preservation and additions pinned separately", () => {
-    // Happy-w-1-16 with rest cleanup (v4.2+): 0.33 = TSP pocket-entry
-    // dives rerouted (by-design amber), 0.58 = rest additions (by
-    // design), mean ~0.003. One-sided upper bounds: improvement must
-    // never fail this test, drift must. Separate asserts per norm —
-    // a single max would let one side hide behind the other.
-    const a = core.parseNC(
-      readFileSync(join(CORPUS, "happy-w-1-16.c2d.nc"), "utf8"),
-    );
-    const b = core.parseNC(
-      readFileSync(join(CORPUS, "happy-w-1-16-buildit.nc"), "utf8"),
-    );
-    assert.ok(
-      b.some((x) => x.rest),
-      "rest spans must be tagged (markers survived?)",
-    );
-    core.tagAddedPlunges(a, b);
-    const d = core.deviation(
-      core.samplePath(a, 0.08, Infinity).pts,
-      core.samplePath(b, 0.08, Infinity).pts,
-      core.stockTop(a),
-    );
-    assert.ok(d.maxA <= 0.4, `preservation drifted: maxA ${d.maxA}`);
-    assert.ok(d.maxB <= 0.7, `additions drifted: maxB ${d.maxB}`);
-    assert.ok(d.mean <= 0.01, `bulk drifted: mean ${d.mean}`);
-  });
-  it("anomaly flag fires on the shark-bottom Z-38 mesh glitch", () => {
-    // Handoff open item: L44200 X33.427Z-38.100 amid Z-14 neighbors.
-    // `worst` pinpoints the spike; `count` also sweeps legit deep
-    // relief cuts on this file, so only worst is pinned (count merely
-    // asserted nonzero — the metric half-lies, reported as such).
-    const txt = readFileSync(
-      join(CORPUS, "shark-bottom-finish-fine.c2d.nc"),
+  it(
+    "shipped rest pair: preservation and additions pinned separately",
+    corpusSkip,
+    () => {
+      // Happy-w-1-16 with rest cleanup (v4.2+): 0.33 = TSP pocket-entry
+      // dives rerouted (by-design amber), 0.58 = rest additions (by
+      // design), mean ~0.003. One-sided upper bounds: improvement must
+      // never fail this test, drift must. Separate asserts per norm —
+      // a single max would let one side hide behind the other.
+      const a = core.parseNC(
+        readFileSync(join(CORPUS, "happy-w-1-16.c2d.nc"), "utf8"),
+      );
+      const b = core.parseNC(
+        readFileSync(join(CORPUS, "happy-w-1-16-buildit.nc"), "utf8"),
+      );
+      assert.ok(
+        b.some((x) => x.rest),
+        "rest spans must be tagged (markers survived?)",
+      );
+      core.tagAddedPlunges(a, b);
+      const d = core.deviation(
+        core.samplePath(a, 0.08, Infinity).pts,
+        core.samplePath(b, 0.08, Infinity).pts,
+        core.stockTop(a),
+      );
+      assert.ok(d.maxA <= 0.4, `preservation drifted: maxA ${d.maxA}`);
+      assert.ok(d.maxB <= 0.7, `additions drifted: maxB ${d.maxB}`);
+      assert.ok(d.mean <= 0.01, `bulk drifted: mean ${d.mean}`);
+    },
+  );
+  it(
+    "anomaly flag fires on the shark-bottom Z-38 mesh glitch",
+    corpusSkip,
+    () => {
+      // Handoff open item: L44200 X33.427Z-38.100 amid Z-14 neighbors.
+      // `worst` pinpoints the spike; `count` also sweeps legit deep
+      // relief cuts on this file, so only worst is pinned (count merely
+      // asserted nonzero — the metric half-lies, reported as such).
+      const txt = readFileSync(
+        join(CORPUS, "shark-bottom-finish-fine.c2d.nc"),
+        "utf8",
+      );
+      const an = core.anomalies(core.parseNC(txt));
+      assert.ok(an.count > 0);
+      assert.ok(
+        Math.abs(an.worst - -38.1) < 0.01,
+        `worst ${an.worst} should be the -38.1 spike`,
+      );
+    },
+  );
+});
+
+describe("viewer UI wiring (integration)", () => {
+  it("viewer.html wires tagAddedPlunges before sampling", () => {
+    const html = readFileSync(
+      new URL("../viewer/viewer.html", import.meta.url),
       "utf8",
     );
-    const an = core.anomalies(core.parseNC(txt));
-    assert.ok(an.count > 0);
     assert.ok(
-      Math.abs(an.worst - -38.1) < 0.01,
-      `worst ${an.worst} should be the -38.1 spike`,
+      html.includes("tagAddedPlunges"),
+      "shipped viewer must call tagAddedPlunges (rest retracts rewritten to file clearance would otherwise score as cuts)",
+    );
+  });
+
+  it("added-plunge tagging samples every original endpoint (stride fix)", () => {
+    // A holds a cut ending at (100,0). B adds a plunge at (100,0) with a
+    // short entry/retract so the locality guard passes; because the plunge
+    // IS near original geometry it must NOT be tagged as added rest.
+    // Regression for nearA's stride over aPts (2 entries/block): the old
+    // i += 3 sampled ~1/3 and wrongly tagged this as rest (false-green risk).
+    const a = core.parseNC("G90\nG21\nG1X100Y0F500\n");
+    const b = core.parseNC(
+      "G90\nG21\nG0X100Y0Z0\nG0X100Y0Z4\nG1Z-2F300\nG0Z4\nM02\n",
+    );
+    core.tagAddedPlunges(a, b);
+    assert.ok(
+      b.every((x) => !x.rest),
+      "near-original plunge wrongly tagged as added rest",
     );
   });
 });

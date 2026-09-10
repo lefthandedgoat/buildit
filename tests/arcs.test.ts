@@ -14,7 +14,7 @@ import {
   splitRuns,
 } from "../src/arcs.ts";
 
-import { CORPUS } from "./corpus.ts";
+import { CORPUS, corpusSkip } from "./corpus.ts";
 const SHARK_FINE = join(CORPUS, "shark-bottom-finish-fine.c2d.nc");
 // 2.5D pocketing file with long constant-Z runs (thousands of arcs expected).
 const POCKET = join(CORPUS, "happy-w-half-mil.c2d.nc");
@@ -300,7 +300,7 @@ function verifyArcSpans(
   return checked;
 }
 
-describe("sparse-chord honesty (happy-w-1-16, v4.3)", () => {
+describe("sparse-chord honesty (happy-w-1-16, v4.3)", corpusSkip, () => {
   it("no emitted arc bulges off a sparse chord", () => {
     // One 3.95mm chord in dense confetti: endpoints verify clean on any
     // circle through them, but the chord midpoint bulged 0.55 off the
@@ -317,7 +317,7 @@ describe("sparse-chord honesty (happy-w-1-16, v4.3)", () => {
     assert.ok(checked > 0, "no arc spans checked");
   });
 });
-describe("corpus fidelity (2.5D pocket file)", () => {
+describe("corpus fidelity (2.5D pocket file)", corpusSkip, () => {
   it("emits thousands of arcs, fewer blocks, zero tolerance violations", () => {
     const prog = parse(readFileSync(POCKET, "utf8"));
     const { text: jText } = janitor(prog, { tolerance: 0.01, decimals: 3 });
@@ -415,7 +415,7 @@ describe("corpus fidelity (2.5D pocket file)", () => {
   });
 });
 
-describe("steep-3D honesty check (shark fine finish)", () => {
+describe("steep-3D honesty check (shark fine finish)", corpusSkip, () => {
   it("fits only genuinely planar spans, Z-blocks everything else", () => {
     const prog = parse(readFileSync(SHARK_FINE, "utf8"));
     const { text: jText } = janitor(prog, { tolerance: 0.01, decimals: 3 });

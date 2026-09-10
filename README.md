@@ -40,9 +40,13 @@ exit 1 means `--check` violations (file still written); exit 2 means
 a usage error — missing input (or a leading flag such as `--help`),
 unknown `--machine`, a non-numeric `--accel`/`--rapid`/`--junction-deviation`/`--tolerance`/
 `--decimals`/`--arc-tol`/`--rest-2d`/`--rest-finish`/
-`--check`/`--check-prev` value, a negative `--junction-deviation`, an invalid `--clearance` value
-(`auto` or a number — anything else exits 2), `--check-prev` without `--check`, or
-`--rest-cut` without both `--rest-2d` and `--finish-tool`.
+`--check`/`--check-prev` value, a non-positive `--accel`/`--rapid`/
+`--rest-2d`/`--rest-finish`/`--finish-tool`/`--check`/`--check-prev`,
+a negative `--junction-deviation`/`--tolerance`/`--arc-tol`, a
+`--decimals` outside integer 0..100, an invalid or non-positive
+`--clearance` value (`auto` or a number — anything else exits 2),
+an unreadable input or unwritable output path, `--check-prev` without
+`--check`, or `--rest-cut` without both `--rest-2d` and `--finish-tool`.
 
 Example output:
 
@@ -122,7 +126,11 @@ analysis (report only) read off the post-janitor stream.
   peck steps) are never touched, and the plane is never raised.
   Fidelity invariant (tested): every output rapid target either existed
   in the input or is a lowered retract / known-XY flight at/above the
-  plane — no new low rapid is ever invented. Measured: 33 pocket
+  plane — no new low rapid is ever invented. Modal-F invariant (tested):
+  a reordered site's first cut gets an explicit F with its own resolved
+  feed, so permuting sites can never change a resolved feed (an
+  inherited-feed site moved ahead of its F source used to inherit a
+  different feed). Measured: 33 pocket
   entries reordered on `happy-w-half-mil` (rapid distance 734 -> 632mm);
   single-hole `shark-holes` correctly yields nothing to reorder (one
   site) with clearance-only savings; `shark-bottom-finish-fine`
@@ -157,7 +165,8 @@ never enter material the input didn't already enter; arcs stay planar
 IJK (v2 rules unchanged).
 
 - G90/G21 assumed (what CC emits); G91 programs parse but positions track
-  as if absolute — flagged, not silently handled.
+  as if absolute — a `G91` word in the input warns on stderr, not handled
+  silently.
 - No G2/G3 in the test corpus; arc *parsing* is supported, arc *generation*
   is v2.
 - The accel model is per-block trapezoidal with stop-to-stop junctions by

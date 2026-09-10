@@ -11,7 +11,7 @@ import {
   junctionSpeed,
 } from "../src/estimate.ts";
 
-import { CORPUS } from "./corpus.ts";
+import { CORPUS, corpusSkip } from "./corpus.ts";
 const SHARK = join(CORPUS, "shark-bottom-finish-fine.c2d.nc");
 const HALF_MIL = join(CORPUS, "happy-w-half-mil.c2d.nc");
 
@@ -200,7 +200,7 @@ describe("rapids stay stop-to-stop under opt-in blending", () => {
   });
 });
 
-describe("legacy default preserved on corpus spot-checks", () => {
+describe("legacy default preserved on corpus spot-checks", corpusSkip, () => {
   it("shark default is bit-identical to explicit jd=0", () => {
     const prog = parse(readFileSync(SHARK, "utf8"));
     const def = estimate(prog, { accel: 400, rapidRate: 5000 });
@@ -233,7 +233,7 @@ describe("legacy default preserved on corpus spot-checks", () => {
   });
 });
 
-describe("shark baselines", () => {
+describe("shark baselines", corpusSkip, () => {
   it("reproduces naive ~38.9 and accel ~53.9 min", () => {
     const prog = parse(readFileSync(SHARK, "utf8"));
     const est = estimate(prog, { accel: 400, rapidRate: 5000 });

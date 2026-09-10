@@ -22,7 +22,6 @@
 //      didn't already enter in the input.
 
 import { type Block, trackMoves } from "./parser.ts";
-import { blockTime } from "./estimate.ts";
 
 export interface RapidsOptions {
   /** Enable TSP reorder. Default true. */
@@ -159,8 +158,11 @@ export function optimizeRapids(
       splitZ = Math.min(splitZ, m.to[2]);
   }
   if (!Number.isFinite(splitZ)) splitZ = 0;
+  // Block -> index once (out.indexOf per move was O(n^2) on large files).
+  const biOf = new Map<Block, number>();
+  out.forEach((b, i) => biOf.set(b, i));
   const enriched: Move[] = m2.map((m) => ({
-    bi: out.indexOf(m.block),
+    bi: biOf.get(m.block) ?? -1,
     motion: m.block.motion,
     from: m.from,
     to: m.to,
@@ -228,9 +230,10 @@ export function optimizeRapids(
         return { firstBi, lastBi };
       });
       // Extended spans: interstitial non-motion blocks travel with the
-      // FOLLOWING site; prologue (before first traverse) and epilogue
-      // (after the last motion block) stay pinned and never move, so
-      // their M/S/T words need no check.
+      // PRECEDING site:
+      // ext[si].to is the next site's first traverse block, so the gap
+      // after site si (comments / modal-state lines) is swept into site
+      // si. Prologue and epilogue stay pinned.
       const ext = spans.map((sp, s) => ({
         from: sp.firstBi,
         to: s + 1 < spans.length ? spans[s + 1].firstBi : sp.lastBi + 1,
@@ -293,6 +296,28 @@ export function optimizeRapids(
         }
         const changed = order.some((v, i) => v !== i);
         if (changed) {
+          // Modal-F safety (v-fix): emit(minimal) only re-emits EXPLICIT F
+          // words, so a site whose first cut inherited its feed from
+          // another site's F would inherit a DIFFERENT feed once the sites
+          // are reordered (reproduced: an F200 site moved after an F300
+          // inheritor raises that site to F300). Materialize an explicit F
+          // with the block's own resolved feed on each site's first cutting
+          // move, making every site self-sufficient at its start. Reorder
+          // can then never change a resolved feed.
+          const firstCut = (a: number, b: number): number => {
+            for (let bi = a; bi <= b; bi++) {
+              const m = out[bi]?.motion;
+              if (m === 1 || m === 2 || m === 3) return bi;
+            }
+            return -1;
+          };
+          for (const sp of spans) {
+            const bi = firstCut(sp.firstBi, sp.lastBi);
+            if (bi < 0) continue;
+            const blk = out[bi];
+            if (blk.explicitFeed || !(blk.feed > 0)) continue;
+            out[bi] = { ...blk, explicitFeed: true };
+          }
           // Rebuild: pinned prologue + reordered spans + pinned epilogue.
           const prologueEnd = spans[0].firstBi;
           const rebuilt: Block[] = out.slice(0, prologueEnd);
@@ -302,11 +327,11 @@ export function optimizeRapids(
           out = rebuilt;
           stats.sitesReordered = sites.length;
         }
-        stats.sitesFound = sites.length;
-      } else {
-        stats.sitesFound = sites.length;
       }
     }
+    // Always report how many sites were found, including when the
+    // sealed gate declined the reorder (was previously left at 0).
+    stats.sitesFound = sites.length;
   }
 
   finishStats(out, stats, opts);
@@ -321,6 +346,10 @@ function finishStats(out: Block[], stats: RapidsStats, opts: RapidsOptions) {
   // Rapid time saved using the same trapezoid model as the estimator.
   // Approximate: saved distance flown at rapid rate.
   const savedDist = Math.max(0, stats.rapidDistBefore - stats.rapidDistAfter);
+  if (!(opts.accel > 0) || !(opts.rapidRate > 0)) {
+    stats.rapidMinSaved = 0;
+    return;
+  }
   const v = opts.rapidRate / 60;
   const dAcc = (v * v) / opts.accel;
   // Upper bound: treat savings as one cruise move (slight overestimate

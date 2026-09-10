@@ -221,7 +221,7 @@ export function emit(
     if (b.coords.J !== undefined) parts.push(`J${fmt(b.coords.J, decimals)}`);
     if (b.coords.R !== undefined) parts.push(`R${fmt(b.coords.R, decimals)}`);
     if (b.explicitFeed && (!minimal || b.feed !== lastFeed)) {
-      const f = Number.isInteger(b.feed) ? String(b.feed) : String(b.feed);
+      const f = String(b.feed);
       parts.push(`F${f}`);
     }
     if (b.explicitFeed) lastFeed = b.feed;

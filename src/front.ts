@@ -12,6 +12,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { getTool } from "./tools.ts";
 import { computeFeeds } from "./feeds.ts";
 import { parse } from "./parser.ts";
@@ -323,4 +324,7 @@ function main(): void {
     console.log(`warn: ${w}`);
 }
 
-main();
+// Only run as the entry point; importing this module (tests, tooling)
+// must not write files or print.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main();
