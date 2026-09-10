@@ -1565,9 +1565,7 @@ export function flipRectBay(
   // its corners sit well inside the tool's swing radius).
   if (place.sized === "uniform") {
     const infeedEast = tool.feedDir < 0; // east->west feeds from the east
-    const shelfW = infeedEast
-      ? inR - (toolX0 + tool.tableW)
-      : toolX0 - inL;
+    const shelfW = infeedEast ? inR - (toolX0 + tool.tableW) : toolX0 - inL;
     if (shelfW >= 100)
       rotating.push(
         B(
