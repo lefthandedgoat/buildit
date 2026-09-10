@@ -546,7 +546,7 @@ export function standBoxes(
     C,
     Cd,
     g.platformT,
-    "3/4 ply; saw base bolts through",
+    "honey locust glue-up; saw base bolts through slotted holes (wood moves)",
   );
   return out;
 }
@@ -1172,7 +1172,7 @@ export function flipRectBay(
       drumDepth,
       19,
       "saw",
-      "3/4 ply; tool bolts through",
+      "honey locust glue-up; tool bolts through slotted holes (wood moves)",
     ),
     B(
       "drum-flat",
@@ -1196,7 +1196,7 @@ export function flipRectBay(
       drumDepth,
       platTop - flatOuter,
       "saw",
-      "3/4 ply cheek",
+      "honey locust glue-up cheek; grain along the 700mm depth",
     ),
     B(
       "drum-cheek-r",
@@ -1208,7 +1208,7 @@ export function flipRectBay(
       drumDepth,
       platTop - flatOuter,
       "saw",
-      "3/4 ply cheek",
+      "honey locust glue-up cheek; grain along the 700mm depth",
     ),
     B(
       "tool-base",
