@@ -5,6 +5,4 @@ dist/
 .intercom/
 .playwright-mcp/
 examples/
-SETUP_STATE.md
-LANE_BOARD.md
 .pi/
